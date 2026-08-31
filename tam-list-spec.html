@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TAM List Build Spec</title>
+</head>
+<body style="margin:0">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Public+Sans:ital,wght@0,400;0,500;0,600;0,800;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+:root{
+  --bg:#F7F7F4; --panel:#FFFFFF; --panel2:#EEEEE8; --ink:#1E2422; --muted:#5F6A64; --line:#DBDDD2;
+  --accent:#217A54; --warn:#8A6D1D;
+  --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#141814; --panel:#1C221D; --panel2:#242B25; --ink:#E6EAE5; --muted:#98A39B; --line:#2E362F;
+    --accent:#4CBE8E; --warn:#D6B25E;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#141814; --panel:#1C221D; --panel2:#242B25; --ink:#E6EAE5; --muted:#98A39B; --line:#2E362F;
+  --accent:#4CBE8E; --warn:#D6B25E;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font:16px/1.62 'Public Sans',system-ui,sans-serif;margin:0}
+.wrap{max-width:800px;margin:0 auto;padding:52px 24px 90px}
+.eyebrow{font:600 12px/1 var(--mono);letter-spacing:.13em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+h1{font-weight:800;font-size:clamp(30px,5.5vw,42px);line-height:1.06;margin:0 0 12px;text-wrap:balance;letter-spacing:-.015em}
+.lede{color:var(--muted);max-width:64ch;margin:0;font-size:16.5px}
+h2{font-weight:800;font-size:20px;margin:48px 0 10px}
+h2 .n{color:var(--accent);font:700 13px var(--mono);margin-right:10px}
+p{max-width:68ch;margin:12px 0}
+pre{font-family:var(--mono);font-size:13px;background:var(--panel);border:1px solid var(--line);padding:16px 18px;overflow-x:auto;line-height:1.65;margin:16px 0}
+.k{color:var(--accent);font-weight:700}
+table{border-collapse:collapse;width:100%;margin:14px 0;font-size:14px}
+th{font:600 11.5px var(--mono);letter-spacing:.07em;text-transform:uppercase;color:var(--muted);text-align:left;padding:8px 10px;border-bottom:2px solid var(--ink)}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+td code{font-family:var(--mono);font-size:12.5px;background:var(--panel2);padding:1px 6px}
+ul{max-width:68ch}
+li{margin:6px 0}
+.scroll{overflow-x:auto}
+.foot{margin-top:56px;padding-top:16px;border-top:1px solid var(--line);color:var(--muted);font-size:13px;max-width:74ch}
+strong{font-weight:600}
+</style>
+<div class="wrap">
+<p class="eyebrow">Build specification · Clay table architecture · two phase TAM project</p>
+<h1>TAM List Build Spec</h1>
+<p class="lede">The exact pipeline I use to turn a directory scale source into a clean, deduped, verified TAM list, and the reason the step order is the whole game: filter before you enrich, and every credit you spend lands on a row that survives to the export.</p>
+
+<h2><span class="n">01</span>Pipeline, in execution order</h2>
+<pre>SOURCE          pull wide from the ICP source (directory, Apollo search, web set)
+   |
+NORMALIZE       casing, domains without www, phone and geo formats, title synonyms
+   |
+<span class="k">DEDUPE</span>          stable keys BEFORE enrichment:
+                company  = root domain + normalized name
+                person   = email when present, else name + company key
+                location = one firm with three branches is ONE partner record
+   |
+<span class="k">FILTER TO ICP</span>   drop out of scope rows NOW, while they are still cheap
+   |
+ENRICH          waterfall only on survivors:
+                Apollo first, Clearbit style fallback second,
+                each field records WHICH provider filled it
+   |
+VERIFY          email verification pass; catch alls and role accounts flagged,
+                hard bounces removed, verification status kept as a column
+   |
+QA GATE         sampling review against acceptance thresholds (below)
+   |
+DELIVER         live Clay table + CSV + Google Sheet, column dictionary included</pre>
+
+<h2><span class="n">02</span>Table design</h2>
+<div class="scroll"><table>
+<tr><th>Column group</th><th>Fields</th><th>Source</th></tr>
+<tr><td>Identity</td><td>company, root domain, person, title (normalized), seniority</td><td>source + normalization</td></tr>
+<tr><td>Firmographic</td><td>employee band, industry, location (city, region, country)</td><td>enrichment waterfall</td></tr>
+<tr><td>Contact</td><td>verified email, verification status, LinkedIn URL, phone where licensed</td><td>waterfall + verifier</td></tr>
+<tr><td>Provenance</td><td>source of each enriched field, enrichment date, dedupe key</td><td>generated</td></tr>
+<tr><td>ICP flags</td><td>match criteria results, inclusion reason, exclusion reason for near misses</td><td>filter logic</td></tr>
+</table></div>
+<p>Provenance columns matter more than they look: when a field is wrong you know which provider to stop trusting, and when the list is refreshed next quarter the table re runs instead of being rebuilt.</p>
+
+<h2><span class="n">03</span>Acceptance thresholds I hold the list to</h2>
+<ul>
+<li>Zero duplicate company keys and zero duplicate person keys in the export.</li>
+<li>Every row carries a verified or flagged email status; hard bounces do not ship.</li>
+<li>Titles normalized to a controlled vocabulary so filters and mail merge work.</li>
+<li>Every enriched field traceable to its provider.</li>
+<li>A random sample check documented before handover, with the sample and results shared.</li>
+</ul>
+
+<h2><span class="n">04</span>Why this holds under volume</h2>
+<p>The same discipline is what my delivered Upwork contracts ran on: VIN data enrichment processing 15000 to 20000 records per day from OEM licensed sources where a wrong field was a compliance failure, USPS CASS address work where verified accuracy was the entire deliverable, and a TAM SAM SOM market sizing engagement. List hygiene is not a Clay feature; it is a working method Clay makes fast.</p>
+
+<p class="foot">Prepared by Yinka Aderibigbe, August 2026. This spec accompanies my proposal for the two phase TAM list project; phase specific criteria plug into the FILTER and ICP flag stages without changing the architecture.</p>
+</div>
+
+</body>
+</html>
