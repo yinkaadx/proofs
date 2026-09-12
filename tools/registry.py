@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.tv_mt5_bridge_diagnostic.page import render as tv_mt5_bridge_diagnostic
     from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
     from tools.wp_form_debugger.page import render as wp_form_debugger
@@ -85,5 +86,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Ecommerce operations",
             render=pod_automation_router,
+        ),
+        Tool(
+            key="tv-mt5-bridge-diagnostic",
+            title="TradingView MT5 Bridge Diagnostic Console",
+            icon="\u23F1",
+            tagline=(
+                "Webhook payload inspector, latency analyzer, and execution "
+                "drift monitor for TradingView to MT5 synchronization."
+            ),
+            audience="Algorithmic trading",
+            render=tv_mt5_bridge_diagnostic,
         ),
     ]
