@@ -10,6 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from shared import theme
+from shared.build_info import build_label
 from tools.registry import Tool, all_tools
 
 st.set_page_config(
@@ -67,5 +68,9 @@ HOME_PAGE = st.Page(home, title="Home", icon="🧰", url_path="home", default=Tr
 with st.sidebar:
     st.markdown("### Toolbench")
     st.caption("Diagnostic tools for client work.")
+    # State the running build. A hosted Streamlit app can serve an old commit
+    # without saying so, which has already caused a tool to be reported live at
+    # a URL the running app had never heard of.
+    st.caption(build_label())
 
 st.navigation({"Overview": [HOME_PAGE], "Tools": TOOL_PAGES}).run()

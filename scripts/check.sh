@@ -27,19 +27,66 @@ UNIT_SUITES=(
   tests/test_multi_channel_inventory_sync_page.py
 )
 BROWSER_SUITES=(
+  tests/test_tool_urls.py
   tests/test_theme.py
   tests/test_browser_inventory_flow.py
 )
 
+# Suites written for pytest rather than the standalone script style.
+PYTEST_SUITES=(
+  tests/test_zero_trust_rmm_console.py
+  tests/test_zero_trust_rmm_console_page.py
+)
+
+STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"
+
 healthy() { [ "$(curl -s -o /dev/null -w '%{http_code}' --noproxy 127.0.0.1 "${BASE}/_stcore/health" 2>/dev/null)" = "200" ]; }
 
+# Newest modification time across everything the app actually serves.
+newest_source() {
+  find streamlit_app.py shared tools .streamlit -type f \
+       \( -name '*.py' -o -name '*.toml' \) -printf '%T@\n' 2>/dev/null \
+    | sort -n | tail -1 | cut -d. -f1
+}
+
+# Reusing a running hub is what makes this fast, but a hub started before the
+# last edit serves stale code and reports a false pass. That already happened:
+# a tool URL was reported missing because the hub predated the registry entry
+# by twelve minutes. So reuse is allowed only when the hub is newer than every
+# source file it serves.
+hub_is_fresh() {
+  [ -f "${STAMP}" ] || return 1
+  local started newest
+  started=$(cat "${STAMP}" 2>/dev/null || echo 0)
+  newest=$(newest_source)
+  [ -n "$newest" ] || return 0
+  [ "$started" -ge "$newest" ]
+}
+
+stop_hub() {
+  local pid
+  pid=$(pgrep -f "server.port ${PORT}" | head -1)
+  [ -n "$pid" ] && kill "$pid" 2>/dev/null && sleep 2
+  return 0
+}
+
 ensure_hub() {
-  healthy && { echo "hub already running on ${PORT}"; return 0; }
+  if healthy; then
+    if hub_is_fresh; then
+      echo "hub already running on ${PORT} and newer than every source file"
+      return 0
+    fi
+    echo "hub on ${PORT} predates the latest edit, restarting so it serves current code"
+    stop_hub
+  fi
   echo "starting hub on ${PORT}"
   setsid nohup streamlit run streamlit_app.py --server.port "${PORT}" \
     --server.headless true --server.address 127.0.0.1 > "${LOG}" 2>&1 < /dev/null &
   disown 2>/dev/null || true
-  for _ in $(seq 1 30); do healthy && { echo "hub ready"; return 0; }; sleep 1; done
+  for _ in $(seq 1 30); do
+    if healthy; then date +%s > "${STAMP}"; echo "hub ready"; return 0; fi
+    sleep 1
+  done
   echo "hub did not come up, see ${LOG}"
   return 1
 }
@@ -61,8 +108,24 @@ run_suite() {
   fi
 }
 
+run_pytest() {
+  local s e out secs
+  s=$(date +%s%N)
+  out=$(python3 -m pytest "$@" -q 2>&1 | tail -1)
+  e=$(date +%s%N)
+  secs=$(awk "BEGIN{printf \"%.1f\", ($e-$s)/1000000000}")
+  printf '  %-50s %6ss  %s\n' "pytest (${#} file(s))" "$secs" "$out"
+  if echo "$out" | grep -qE "[0-9]+ passed"; then
+    n=$(echo "$out" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
+    total=$((total + ${n:-0}))
+  else
+    failed=$((failed + 1))
+  fi
+}
+
 echo "== Suites =="
 for suite in "${UNIT_SUITES[@]}"; do run_suite "$suite"; done
+run_pytest "${PYTEST_SUITES[@]}"
 
 if [ "$MODE" != "fast" ]; then
   ensure_hub || exit 1

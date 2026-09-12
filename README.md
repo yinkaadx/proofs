@@ -26,6 +26,27 @@ browser. Creating one app per tool means one manual step per tool, forever. One
 hub app means that step happens once in total, and every tool after that ships
 by pushing code.
 
+## Tool URLs
+
+Never compose a tool URL by hand. Print them from the registry, which is the
+same source the hub builds its navigation from:
+
+```bash
+python3 scripts/urls.py                 # live hub
+python3 scripts/urls.py http://127.0.0.1:8600
+```
+
+A path is only *proven* once `tests/test_tool_urls.py` has opened it in a real
+browser. That suite walks the registry, so every tool is covered automatically
+the moment it is registered, and it fails if a page is Streamlit's not found
+fallback, if a tool's title is missing, or if the hub is serving an older commit
+than the checkout. It also checks that a deliberately invalid path still reports
+not found, so the suite cannot pass vacuously.
+
+The hub prints the commit it is running in its sidebar, as `build <sha>`. If
+that does not match the commit you expect, the deployment is stale and needs a
+reboot, not a fix.
+
 ## Tools
 
 | Tool | Path | What it does |
@@ -33,6 +54,7 @@ by pushing code.
 | [WP Form Debugger](tools/wp_form_debugger/README.md) | `/wp-form-debugger` | Finds why a WordPress form stopped submitting or delivering and returns the exact PHP, JavaScript and wp-config.php fix |
 | [NetSuite HubSpot Idempotent Sync Console](tools/netsuite_hubspot_sync/README.md) | `/netsuite-hubspot-sync` | Deal sync simulator, account matching, SHA256 idempotency ledger and SharePoint audit feed |
 | [Multi Channel Inventory Sync Engine](tools/multi_channel_inventory_sync/README.md) | `/multi-channel-inventory-sync` | Cross platform SKU mapping, stock deduction and negative inventory prevention for Amazon, eBay and Shopify |
+| [Zero Trust Remote Access Console](tools/zero_trust_rmm_console/README.md) | `/zero-trust-rmm-console` | Multitenant RBAC simulator, MFA enforcement ledger and ad hoc session code generator |
 
 ## Adding a tool
 
