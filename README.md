@@ -4,7 +4,20 @@ A single Streamlit app that hosts every client facing diagnostic tool in this
 repository. It is deployed once and never needs deploying again: each new tool
 becomes a page inside it and goes live on the next push.
 
-Live entry point: `streamlit_app.py` at the repository root.
+**Live: https://proofs-toolbench.streamlit.app**
+
+## Deployment facts
+
+| Item | Value |
+| --- | --- |
+| Live URL | https://proofs-toolbench.streamlit.app |
+| Host | Streamlit Community Cloud, signed in with GitHub |
+| Entry file | `streamlit_app.py` at the repository root |
+| Deploy branch | `claude/kind-feynman-489x72` |
+| Redeploy | Automatic on every push to that branch |
+
+Changing the entry file path or the branch means recreating the app, so both
+stay as they are. Adding tools never touches either.
 
 ## Why a hub
 
