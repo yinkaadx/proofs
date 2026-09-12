@@ -42,6 +42,8 @@ PYTEST_SUITES=(
   tests/test_tv_mt5_bridge_diagnostic_page.py
   tests/test_sharepoint_zero_trust_simulator.py
   tests/test_sharepoint_zero_trust_simulator_page.py
+  tests/test_retreat_funnel_redundancy_guard.py
+  tests/test_retreat_funnel_redundancy_guard_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"

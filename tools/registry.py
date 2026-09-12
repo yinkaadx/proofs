@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.retreat_funnel_redundancy_guard.page import render as retreat_funnel_redundancy_guard
     from tools.sharepoint_zero_trust_simulator.page import render as sharepoint_zero_trust_simulator
     from tools.tv_mt5_bridge_diagnostic.page import render as tv_mt5_bridge_diagnostic
     from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
@@ -109,5 +110,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Microsoft 365 security",
             render=sharepoint_zero_trust_simulator,
+        ),
+        Tool(
+            key="retreat-funnel-redundancy-guard",
+            title="Retreat Funnel Redundancy Guard",
+            icon="\U0001F33F",
+            tagline=(
+                "FG Funnels webhook simulator, automated Slack alert routing, "
+                "and webinar metrics tracking."
+            ),
+            audience="Coaching and retreat marketing",
+            render=retreat_funnel_redundancy_guard,
         ),
     ]
