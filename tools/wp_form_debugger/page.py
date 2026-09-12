@@ -73,9 +73,9 @@ def render() -> None:
     with tab_audit:
         st.markdown("#### Paste your form HTML")
         c1, c2, c3 = st.columns([1, 1, 2])
-        if c1.button("Load broken sample", use_container_width=True):
+        if c1.button("Load broken sample", width="stretch"):
             st.session_state["html_input"] = SAMPLE_BROKEN_HTML
-        if c2.button("Load healthy sample", use_container_width=True):
+        if c2.button("Load healthy sample", width="stretch"):
             st.session_state["html_input"] = SAMPLE_HEALTHY_HTML
 
         html = st.text_area(
