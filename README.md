@@ -71,7 +71,7 @@ python3 tests/test_theme.py                   # one consistent design, needs a r
 Every suite declares its pass and fail markers before running and parses results
 programmatically, so nothing is judged by eye. Clean runs print
 `HUB RESULT: PASS 23/23`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
-`PHP RESULT: PASS 30/30` and `THEME RESULT: PASS 6/6`, and each exits 0. Any
+`PHP RESULT: PASS 30/30` and `THEME RESULT: PASS 14/14`, and each exits 0. Any
 failure prints lines beginning `FAIL` and exits 1.
 
 `tests/test_php_syntax.py` skips cleanly when no `php` binary is present, and
@@ -109,13 +109,24 @@ by GitHub Pages. They are unrelated to the hub and unaffected by it.
 - Downloadable reports redact credentials. Redaction is the default in the
   generator, so a caller that forgets cannot leak one.
 
-## One design, not two
+## Light and dark, bound to Streamlit's actual theme
 
-The palette in `shared/theme.py` is deliberately single scheme and matches the
-theme pinned in `.streamlit/config.toml`. Streamlit paints its own chrome from
-that config and exposes no CSS variables for it, so a `prefers-color-scheme`
-rule in our stylesheet cannot know what the rest of the page looks like. One
-used to exist, and a visitor whose device was set to dark saw dark cards
-floating on Streamlit's light page beside a light sidebar. Change the config and
-the palette together, and `tests/test_theme.py` will hold them to it by
-measuring real rendered colours under both device settings.
+The app follows each visitor's device, in light and in dark, and the two halves
+of the page cannot drift apart.
+
+Streamlit exposes no CSS variables for its theme, so our stylesheet cannot read
+the colours it painted. It does, however, stamp the active theme onto `.stApp`
+as `color-scheme`, and that property inherits. The palette in `shared/theme.py`
+is therefore expressed with `light-dark()`, which resolves against that
+inherited value, so our components follow the theme Streamlit actually rendered
+rather than the device.
+
+The distinction matters. An earlier version keyed the palette to
+`prefers-color-scheme`, which produced dark cards on Streamlit's light page
+beside a light sidebar for any visitor whose device was set to dark. Keying to
+the device would also break again the moment someone overrode the theme in
+Streamlit's own menu.
+
+`tests/test_theme.py` drives a real browser under both device settings and
+checks that every surface agrees on one scheme and that text on those surfaces
+clears WCAG AA contrast.

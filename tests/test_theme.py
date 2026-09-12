@@ -1,13 +1,12 @@
-"""Ground truth test: the page must look like one design under either device
-colour setting.
+"""Ground truth test: one coherent, legible design in light and in dark.
 
-Streamlit paints its own chrome from `.streamlit/config.toml` and exposes no
-CSS variables for it, so a `prefers-color-scheme` rule in our stylesheet cannot
-know what the rest of the page looks like. One used to exist, and a visitor
-whose device was set to dark saw dark cards floating on Streamlit's light page
-next to a light sidebar. This test drives a real browser under both settings
-and compares measured background luminance, so the two can never drift apart
-again.
+Streamlit exposes no CSS variables for its theme, but it stamps the active
+theme onto `.stApp` as `color-scheme`, which inherits, so our `light-dark()`
+tokens resolve against the theme Streamlit actually painted. A
+`prefers-color-scheme` rule here once produced dark cards on Streamlit's light
+page beside a light sidebar. This test drives a real browser under both device
+settings and checks two things that would have caught it: every surface agrees
+on one scheme, and the text on those surfaces stays readable.
 
 Needs a running hub. Start one first, or pass a base URL:
     streamlit run streamlit_app.py --server.port 8503 --server.headless true
@@ -66,8 +65,31 @@ def family(value: float) -> str:
     return "light" if value >= 0.5 else "dark"
 
 
+def channels(css_colour: str) -> tuple[int, int, int]:
+    parts = css_colour.replace("rgba(", "").replace("rgb(", "").rstrip(")").split(",")
+    return tuple(int(float(p)) for p in parts[:3])
+
+
+def relative_luminance(css_colour: str) -> float:
+    """WCAG relative luminance."""
+    out = []
+    for raw in channels(css_colour):
+        c = raw / 255
+        out.append(c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4)
+    r, g, b = out
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def contrast(foreground: str, background: str) -> float:
+    """WCAG contrast ratio, 1.0 (invisible) to 21.0 (black on white)."""
+    a, b = relative_luminance(foreground), relative_luminance(background)
+    lighter, darker = max(a, b), min(a, b)
+    return round((lighter + 0.05) / (darker + 0.05), 2)
+
+
 MEASURE = """() => {
   const bg = n => n ? getComputedStyle(n).backgroundColor : null;
+  const fg = n => n ? getComputedStyle(n).color : null;
   return {
     page: bg(document.querySelector('.stApp') || document.body),
     sidebar: bg(document.querySelector('[data-testid="stSidebar"]')),
@@ -77,7 +99,21 @@ MEASURE = """() => {
   };
 }"""
 
-print("== The page reads as one design under either device colour setting ==")
+MEASURE_TEXT = """() => {
+  const bg = n => n ? getComputedStyle(n).backgroundColor : null;
+  const fg = n => n ? getComputedStyle(n).color : null;
+  return {
+    cardBg: bg(document.querySelector('.app-card')),
+    bodyText: fg(document.querySelector('.app-card p')),
+    heading: fg(document.querySelector('.app-card h4')),
+    severityTag: fg(document.querySelector('.app-tag')),
+    evidenceBg: bg(document.querySelector('.app-ev')),
+    evidenceText: fg(document.querySelector('.app-ev')),
+  };
+}"""
+
+print("== One coherent, legible design under either device colour setting ==")
+page_text: dict[str, dict] = {}
 launch_error = None
 with sync_playwright() as p:
     try:
@@ -99,6 +135,7 @@ with sync_playwright() as p:
         page.get_by_text("Load broken sample").first.click()
         page.wait_for_timeout(3500)
         measured = page.evaluate(MEASURE)
+        page_text[scheme] = page.evaluate(MEASURE_TEXT)
         context.close()
 
         present = {k: v for k, v in measured.items() if v}
@@ -113,6 +150,22 @@ with sync_playwright() as p:
         expect(families.get("page") == families.get("card"),
                f"[{scheme}] cards match the page they sit on "
                f"(page={families.get('page')}, card={families.get('card')})")
+
+        text = page_text.get(scheme, {})
+        card_bg = text.get("cardBg")
+        if card_bg:
+            for label, minimum in (("bodyText", 4.5), ("heading", 4.5), ("severityTag", 3.0)):
+                value = text.get(label)
+                if value:
+                    ratio = contrast(value, card_bg)
+                    expect(ratio >= minimum,
+                           f"[{scheme}] {label} is readable on the card "
+                           f"(contrast {ratio}, needs {minimum})")
+        if text.get("evidenceBg") and text.get("evidenceText"):
+            ratio = contrast(text["evidenceText"], text["evidenceBg"])
+            expect(ratio >= 4.5,
+                   f"[{scheme}] evidence text is readable on its panel "
+                   f"(contrast {ratio}, needs 4.5)")
 
     browser.close()
 

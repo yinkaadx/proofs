@@ -1,14 +1,15 @@
 """Shared visual system: one stylesheet and one set of helpers, so every
 tool in the hub looks like part of the same product.
 
-The palette is deliberately single scheme. `.streamlit/config.toml` pins
-Streamlit to a light theme, and Streamlit exposes no CSS variables for the
-theme it painted, so a `prefers-color-scheme` rule here cannot know what the
-rest of the page looks like. One used to exist, and on a visitor whose device
-was set to dark it produced dark cards on Streamlit's light page with a light
-sidebar. Colours here therefore match the pinned theme, and both must change
-together. tests/test_theme.py enforces that they agree under either device
-setting.
+The palette follows the theme Streamlit actually painted, in light and in dark.
+
+Streamlit exposes no CSS variables for its theme, but it does stamp the active
+theme onto `.stApp` as `color-scheme`, and that property inherits. `light-dark()`
+resolves against it, so our colours track Streamlit's rather than the device's.
+This matters: a `prefers-color-scheme` rule here once produced dark cards on
+Streamlit's light page beside a light sidebar, and it would return the moment a
+visitor overrode the theme in Streamlit's own menu. tests/test_theme.py measures
+real rendered colours under both settings and holds the two together.
 
 Import `esc` before interpolating anything user supplied into an
 `unsafe_allow_html` block. Pasted markup rendered raw would become live HTML.
@@ -22,6 +23,8 @@ import streamlit as st
 
 STYLE = """
 <style>
+/* Light values alone, so a browser without light-dark() still gets a complete
+   and internally consistent palette rather than a broken one. */
 :root {
   --app-ink: #0f172a;
   --app-muted: #64748b;
@@ -32,7 +35,24 @@ STYLE = """
   --app-ok: #047857;
   --app-card: #ffffff;
   --app-soft: #f8fafc;
-  color-scheme: light;
+}
+/* Streamlit stamps its ACTIVE theme onto .stApp as `color-scheme`, and
+   color-scheme inherits, so light-dark() resolves against the theme Streamlit
+   actually painted rather than against the device. That is the whole point:
+   a visitor who overrides the theme in Streamlit's own menu still gets one
+   coherent design. */
+@supports (color: light-dark(#000, #fff)) {
+  :root {
+    --app-ink: light-dark(#0f172a, #e6edf7);
+    --app-muted: light-dark(#64748b, #9aa8bd);
+    --app-line: light-dark(#e2e8f0, #2b3648);
+    --app-accent: light-dark(#1d4ed8, #7aa7ff);
+    --app-crit: light-dark(#b91c1c, #ff8a8a);
+    --app-warn: light-dark(#b45309, #f5b544);
+    --app-ok: light-dark(#047857, #46d4a0);
+    --app-card: light-dark(#ffffff, #151c28);
+    --app-soft: light-dark(#f8fafc, #0f1622);
+  }
 }
 .app-hero {
   border: 1px solid var(--app-line);
@@ -82,9 +102,9 @@ STYLE = """
   text-transform: uppercase; letter-spacing: .08em;
   padding: .12rem .5rem; border-radius: 999px; margin-right: .5rem;
 }
-.app-tag.crit { background: rgba(185,28,28,.12); color: var(--app-crit); }
-.app-tag.warn { background: rgba(180,83,9,.12); color: var(--app-warn); }
-.app-tag.info { background: rgba(29,78,216,.12); color: var(--app-accent); }
+.app-tag.crit { background: color-mix(in srgb, var(--app-crit) 14%, transparent); color: var(--app-crit); }
+.app-tag.warn { background: color-mix(in srgb, var(--app-warn) 14%, transparent); color: var(--app-warn); }
+.app-tag.info { background: color-mix(in srgb, var(--app-accent) 14%, transparent); color: var(--app-accent); }
 .app-ev {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .8rem; background: var(--app-soft);
@@ -128,7 +148,8 @@ STYLE = """
 .app-pill {
   display: inline-block; font-size: .66rem; font-weight: 700; letter-spacing: .09em;
   text-transform: uppercase; padding: .14rem .5rem; border-radius: 999px;
-  background: rgba(29,78,216,.12); color: var(--app-accent); align-self: flex-start;
+  background: color-mix(in srgb, var(--app-accent) 14%, transparent);
+  color: var(--app-accent); align-self: flex-start;
 }
 </style>
 """
