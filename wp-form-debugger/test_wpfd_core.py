@@ -23,6 +23,7 @@ from wpfd_core import (
     build_report,
     severity_counts,
     simulate_smtp,
+    smtp_wpconfig_fix,
 )
 
 failures: list[str] = []
@@ -179,6 +180,81 @@ expect("SET-YOUR-SMTP-PASSWORD-HERE" not in r.fix_wpconfig,
 r_ssl = simulate_smtp("Custom / other", FX_HOST, 465, "SSL",
                       FX_USER, FX_PASS, FX_FROM)
 expect("'SMTP_SECURE', 'ssl'" in r_ssl.fix_wpconfig, "SSL maps to PHPMailer 'ssl'")
+
+print("== Generated PHP is a paste ready fragment, never a second opening tag ==")
+php_blocks = [("smtp_php_fix", simulate_smtp("Custom / other", FX_HOST, 587, "STARTTLS",
+                                             FX_USER, FX_PASS, FX_FROM).fix_php)]
+php_blocks.append(("smtp wp-config", simulate_smtp("Custom / other", FX_HOST, 587,
+                                                   "STARTTLS", FX_USER, FX_PASS,
+                                                   FX_FROM).fix_wpconfig))
+for f in analyze_html(SAMPLE_BROKEN_HTML) + analyze_html(SAMPLE_HEALTHY_HTML):
+    php_blocks += [(f"finding {f.fid} php", f.fix_php),
+                   (f"finding {f.fid} wpconfig", f.fix_wpconfig)]
+for key, issue in KNOWN_ISSUES.items():
+    php_blocks += [(f"issue {key} php", issue.fix_php),
+                   (f"issue {key} wpconfig", issue.fix_wpconfig)]
+for name, block in php_blocks:
+    if block:
+        expect("<?php" not in block, f"{name} carries no PHP opening tag")
+        expect(block.lstrip().startswith("/*"), f"{name} opens with the paste note comment")
+
+print("== PHP string literals are escaped ==")
+tricky_pass = "pa'ss\\word"
+r = simulate_smtp("Custom / other", FX_HOST, 587, "STARTTLS", FX_USER,
+                  tricky_pass, FX_FROM, "O'Brien & Co")
+expect("\\'" in r.fix_wpconfig, "apostrophe in the password is backslash escaped")
+expect("\\\\" in r.fix_wpconfig, "backslash in the password is doubled")
+expect("define( 'SMTP_PASS', 'pa\\'ss\\\\word' );" in r.fix_wpconfig,
+       f"password renders as a valid PHP literal (got: "
+       f"{[l for l in r.fix_wpconfig.splitlines() if 'SMTP_PASS' in l]})")
+expect("define( 'SMTP_FROM_NAME', 'O\\'Brien & Co' );" in r.fix_wpconfig,
+       "apostrophe in the From name is escaped too")
+
+
+def php_literals_balanced(block: str) -> bool:
+    """Every define() line must hold a well formed single quoted literal:
+    walking the string, an unescaped quote toggles in and out, and the line
+    must end outside a literal."""
+    for line in block.splitlines():
+        if not line.strip().startswith("define("):
+            continue
+        inside, i = False, 0
+        while i < len(line):
+            ch = line[i]
+            if ch == "\\" and inside:
+                i += 2
+                continue
+            if ch == "'":
+                inside = not inside
+            i += 1
+        if inside:
+            return False
+    return True
+
+
+expect(php_literals_balanced(r.fix_wpconfig),
+       "every define() line closes its string literal with a tricky password")
+for probe in ("plain", "with space", "quote'inside", "back\\slash", "both'\\mixed",
+              "semi;colon", 'double"quote', "unicode-é"):
+    rp = simulate_smtp("Custom / other", FX_HOST, 587, "STARTTLS", FX_USER,
+                       probe, FX_FROM)
+    expect(php_literals_balanced(rp.fix_wpconfig),
+           f"define() literals stay balanced for password {probe!r}")
+
+print("== Reports never carry a live SMTP password ==")
+secret_probe = "-".join(("live", "secret", "value"))
+r = simulate_smtp("Custom / other", FX_HOST, 587, "STARTTLS", FX_USER,
+                  secret_probe, FX_FROM)
+expect(secret_probe in r.fix_wpconfig, "on screen fix keeps the real password")
+expect(secret_probe not in r.fix_wpconfig_redacted, "redacted fix drops the real password")
+expect("REDACTED" in r.fix_wpconfig_redacted, "redacted fix says it is redacted")
+shareable = build_report(None, [], r, "acme.com")
+expect(secret_probe not in shareable, "downloadable report contains no live password")
+expect("REDACTED" in shareable, "report shows the redaction marker instead")
+expect("redacted" in shareable.lower(), "report explains that the password is redacted")
+expect(smtp_wpconfig_fix(FX_HOST, 587, "STARTTLS", FX_USER, secret_probe,
+                         FX_FROM, "Acme").find(secret_probe) == -1,
+       "redaction is the default, so a forgetful caller cannot leak the password")
 
 print("== Known issue library integrity ==")
 expect(len(KNOWN_ISSUES) >= 9, f"library holds at least 9 issues (got {len(KNOWN_ISSUES)})")

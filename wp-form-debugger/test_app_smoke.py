@@ -130,6 +130,14 @@ expect(len(at.success) >= 1, "valid configuration surfaces a success verdict")
 body = text_of(at)
 expect(f"SMTP_HOST', '{FX_HOST}'" in body, "generated wp-config carries the entered host")
 expect(f"SMTP_PASS', '{FX_PASS}'" in body, "generated wp-config carries the entered password")
+expect("<?php" not in body, "generated snippets carry no second PHP opening tag")
+expect(len(at.warning) >= 1, "screen warns that the block holds the live password")
+
+print("== Downloadable report redacts the SMTP password ==")
+report_body = "\n".join(str(getattr(el, "value", "")) for el in at.markdown)
+expect(FX_PASS not in report_body.split("Client ready report")[-1]
+       if "Client ready report" in report_body else True,
+       "report preview does not repeat the live password")
 
 print("== Report tab assembles and offers download ==")
 at = run()

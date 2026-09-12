@@ -47,15 +47,40 @@ streamlit run streamlit_app.py
 
 The app serves on http://localhost:8501.
 
+## Generated code is a fragment, and the password stays out of the report
+
+Two rules the generator follows, because breaking either costs a client a
+broken site or a leaked credential:
+
+- Every PHP snippet is a **fragment** for a file that already opened a `<?php`
+  block, so none of them carry their own opening tag. Pasting a second opening
+  tag into `wp-config.php` or `functions.php` is a parse error on every
+  request.
+- Every value interpolated into generated PHP goes through `php_quote()`, so a
+  password containing an apostrophe or a backslash still produces a file that
+  parses and keeps its exact value.
+- The downloadable report **redacts the SMTP password**, because that file is
+  meant to be shared or attached to a ticket. The real value appears only on
+  the operator's screen in the SMTP Delivery Check tab. Redaction is the
+  default in `smtp_wpconfig_fix()`, so a caller that forgets cannot leak it.
+
 ## Tests
 
 ```bash
-python3 test_wpfd_core.py
+python3 test_wpfd_core.py    # engine logic
+python3 test_app_smoke.py    # UI, via Streamlit's AppTest harness
+python3 test_php_syntax.py   # every generated PHP snippet parsed by real PHP
 ```
 
-The suite declares its pass and fail markers before running and parses results
-programmatically. A clean run prints `RESULT: PASS 120/120` and exits 0; any
-failure prints lines beginning `FAIL` and exits 1.
+Each suite declares its pass and fail markers before running and parses results
+programmatically. Clean runs print `RESULT: PASS 164/164`,
+`UI RESULT: PASS 38/38` and `PHP RESULT: PASS 30/30` and exit 0; any failure
+prints lines beginning `FAIL` and exits 1.
+
+`test_php_syntax.py` pastes each generated snippet into a host file that has
+already opened a PHP block and runs `php --syntax-check` over it, including
+sixteen awkward passwords (apostrophes, backslashes, unicode). It skips
+cleanly when no `php` binary is present.
 
 ## Layout
 
@@ -63,7 +88,9 @@ failure prints lines beginning `FAIL` and exits 1.
 | --- | --- |
 | `streamlit_app.py` | User interface, four tabs, styling and report download |
 | `wpfd_core.py` | Analysis engine: HTML audit, issue library, SMTP simulation, report builder |
-| `test_wpfd_core.py` | Ground truth test suite, 120 checks |
+| `test_wpfd_core.py` | Engine test suite, 164 checks |
+| `test_app_smoke.py` | UI test suite via AppTest, 38 checks |
+| `test_php_syntax.py` | Real PHP parse check of every generated snippet, 30 checks |
 | `requirements.txt` | Runtime dependencies |
 | `.streamlit/config.toml` | Theme and client settings |
 

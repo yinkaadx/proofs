@@ -378,10 +378,16 @@ with tab_smtp:
         st.code(result.fix_wpconfig, language="php")
         st.markdown("**functions.php**")
         st.code(result.fix_php, language="php")
+        st.warning(
+            "The wp-config.php block above contains the SMTP password exactly as "
+            "you typed it, so treat this screen as sensitive: paste it straight "
+            "into the file and keep wp-config.php out of version control. The "
+            "downloadable report redacts the password so it stays safe to share."
+        )
         st.caption(
-            "The password is written into the wp-config.php snippet only when you "
-            "entered one, so you can paste it straight into the file. Keep "
-            "wp-config.php outside version control."
+            "Both snippets are fragments for files that already open a PHP block, "
+            "so neither carries its own opening tag. Paste them inside the "
+            "existing PHP code."
         )
 
 # ---------------------------------------------------------------------------

@@ -17,6 +17,29 @@ ENGINE_VERSION = "1.0.0"
 SEVERITY_ORDER = {"critical": 0, "warning": 1, "info": 2}
 SEVERITY_LABEL = {"critical": "Critical", "warning": "Warning", "info": "Info"}
 
+REDACTED = "REDACTED-SEE-THE-APP-FOR-THE-REAL-VALUE"
+
+# Every generated PHP block is a fragment pasted into a file that is already
+# inside a PHP block, so none of them carry their own opening tag.
+PASTE_NOTE = "/* Paste inside the existing PHP block. Do not add another opening tag. */"
+
+
+def php_quote(value: str) -> str:
+    """Render a Python string as a PHP single quoted literal.
+
+    Inside single quotes PHP only gives backslash and the quote itself a
+    special meaning, so those two are the only characters to escape. Without
+    this, a password containing an apostrophe produces a wp-config.php that
+    will not parse, and a backslash silently changes the stored value.
+    """
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
+def php_fragment(body: str) -> str:
+    """Prefix a PHP snippet with the paste note. Every snippet here is pasted
+    into a file that is already inside a PHP block."""
+    return f"{PASTE_NOTE}\n{body}"
+
 
 @dataclass
 class Finding:
@@ -35,8 +58,7 @@ class Finding:
 # Reusable fix snippets (exact, complete, copy paste ready)
 # ---------------------------------------------------------------------------
 
-FIX_PHP_AJAX = r"""<?php
-/**
+FIX_PHP_AJAX = php_fragment(r"""/**
  * functions.php: correct AJAX form wiring.
  * 1) Enqueue the form script with jQuery declared as a dependency.
  * 2) Pass the AJAX URL and a fresh nonce to the script (never hardcode either).
@@ -82,7 +104,7 @@ function acme_handle_contact() {
     }
     wp_send_json_error( array( 'message' => 'Mail could not be sent.' ), 500 );
 }
-"""
+""")
 
 FIX_JS_AJAX = r"""/* js/contact-form.js: submit through admin-ajax with the localized URL and nonce.
    The jQuery(function ($) { ... }) wrapper restores $ safely under WordPress
@@ -110,8 +132,7 @@ jQuery(function ($) {
 });
 """
 
-FIX_PHP_NONCE_REFRESH = r"""<?php
-/**
+FIX_PHP_NONCE_REFRESH = php_fragment(r"""/**
  * functions.php: expired nonce repair for cached pages.
  * A page cache serves HTML older than the nonce lifetime (12 to 24 hours),
  * so the embedded nonce fails with 403 or a bare "-1" response.
@@ -124,7 +145,7 @@ add_action( 'wp_ajax_nopriv_acme_fresh_nonce', 'acme_fresh_nonce' );
 function acme_fresh_nonce() {
     wp_send_json_success( array( 'nonce' => wp_create_nonce( 'acme_contact_form' ) ) );
 }
-"""
+""")
 
 FIX_JS_NONCE_REFRESH = r"""/* js/contact-form.js addition: replace the page's stale nonce at load time. */
 jQuery(function ($) {
@@ -143,8 +164,7 @@ FIX_NOTES_NONCE_CACHE = (
     "weakens CSRF protection, so prefer the refresh endpoint above."
 )
 
-FIX_PHP_MAIL_LOGGER = r"""<?php
-/**
+FIX_PHP_MAIL_LOGGER = php_fragment(r"""/**
  * functions.php: make silent mail drop offs visible.
  * wp_mail() can return true while the message never leaves the server,
  * because PHP mail() hands off to the local MTA with no delivery feedback.
@@ -153,12 +173,11 @@ FIX_PHP_MAIL_LOGGER = r"""<?php
 add_action( 'wp_mail_failed', function ( $error ) {
     error_log( 'wp_mail failed: ' . $error->get_error_message() );
 } );
-"""
+""")
 
 
 def smtp_php_fix() -> str:
-    return r"""<?php
-/**
+    return php_fragment(r"""/**
  * functions.php: route ALL WordPress mail through authenticated SMTP.
  * Reads its credentials from wp-config.php constants so secrets stay
  * out of the theme.
@@ -178,23 +197,33 @@ add_action( 'phpmailer_init', function ( $phpmailer ) {
 add_action( 'wp_mail_failed', function ( $error ) {
     error_log( 'wp_mail failed: ' . $error->get_error_message() );
 } );
-"""
+""")
 
 
 def smtp_wpconfig_fix(host: str, port: int, encryption: str, username: str,
-                      password: str, from_addr: str, from_name: str) -> str:
+                      password: str, from_addr: str, from_name: str,
+                      redact_password: bool = True) -> str:
+    """Build the wp-config.php block.
+
+    redact_password defaults to True so that any caller which forgets to think
+    about it cannot leak a live credential. Pass False only where the output
+    goes straight to the operator on screen, never into a shareable file.
+    """
     secure = "tls" if encryption == "STARTTLS" else ("ssl" if encryption == "SSL" else "")
-    shown_pass = password if password else "SET-YOUR-SMTP-PASSWORD-HERE"
+    if redact_password:
+        shown_pass = REDACTED
+    else:
+        shown_pass = password if password else "SET-YOUR-SMTP-PASSWORD-HERE"
     return (
-        "<?php\n"
         "/* wp-config.php: add ABOVE the line that says 'That's all, stop editing!'. */\n"
-        f"define( 'SMTP_HOST', '{host}' );\n"
-        f"define( 'SMTP_PORT', {port} );\n"
-        f"define( 'SMTP_SECURE', '{secure}' );\n"
-        f"define( 'SMTP_USER', '{username}' );\n"
-        f"define( 'SMTP_PASS', '{shown_pass}' );\n"
-        f"define( 'SMTP_FROM', '{from_addr}' );\n"
-        f"define( 'SMTP_FROM_NAME', '{from_name}' );\n"
+        f"{PASTE_NOTE}\n"
+        f"define( 'SMTP_HOST', {php_quote(host)} );\n"
+        f"define( 'SMTP_PORT', {int(port)} );\n"
+        f"define( 'SMTP_SECURE', {php_quote(secure)} );\n"
+        f"define( 'SMTP_USER', {php_quote(username)} );\n"
+        f"define( 'SMTP_PASS', {php_quote(shown_pass)} );\n"
+        f"define( 'SMTP_FROM', {php_quote(from_addr)} );\n"
+        f"define( 'SMTP_FROM_NAME', {php_quote(from_name)} );\n"
         "\n"
         "/* Delivery debugging: failures land in wp-content/debug.log. */\n"
         "define( 'WP_DEBUG', true );\n"
@@ -313,8 +342,7 @@ def analyze_html(html: str) -> list[Finding]:
                         "Change the action to https, then fix the root cause in "
                         "wp-config.php or Settings, General so siteurl and home both "
                         "use https."),
-                    fix_wpconfig=(
-                        "<?php\n"
+                    fix_wpconfig=php_fragment(
                         "/* wp-config.php: force correct https URLs. */\n"
                         "define( 'WP_HOME', 'https://example.com' );\n"
                         "define( 'WP_SITEURL', 'https://example.com' );\n"),
@@ -599,7 +627,8 @@ KNOWN_ISSUES: dict[str, KnownIssue] = {i.key: i for i in [
         fix_php=smtp_php_fix(),
         fix_wpconfig=smtp_wpconfig_fix("smtp.example.com", 587, "STARTTLS",
                                        "postmaster@example.com", "",
-                                       "postmaster@example.com", "Website"),
+                                       "postmaster@example.com", "Website",
+                                       redact_password=False),
         fix_notes=(
             "Use the SMTP Delivery Check tab to validate host, port and "
             "encryption for your provider and to generate this snippet with "
@@ -653,8 +682,7 @@ KNOWN_ISSUES: dict[str, KnownIssue] = {i.key: i for i in [
         diagnosis=(
             "A security plugin or custom snippet disables REST for logged out "
             "users, which also kills legitimate public form endpoints."),
-        fix_php=r"""<?php
-/* functions.php: allow the specific public form route while keeping the rest locked. */
+        fix_php=php_fragment(r"""/* functions.php: allow the specific public form route while keeping the rest locked. */
 add_filter( 'rest_authentication_errors', function ( $result ) {
     if ( ! empty( $result ) ) {
         $route = $_SERVER['REQUEST_URI'] ?? '';
@@ -664,7 +692,7 @@ add_filter( 'rest_authentication_errors', function ( $result ) {
     }
     return $result;
 } );
-""",
+"""),
         fix_notes=(
             "Prefer re enabling REST in the security plugin's own settings "
             "(Wordfence: Firewall options; iThemes: WordPress Tweaks, REST "
@@ -765,7 +793,11 @@ class SmtpResult:
     verdict_level: str = OK
     recommendations: list[str] = field(default_factory=list)
     fix_php: str = ""
+    # fix_wpconfig carries the live password and is for the operator's screen
+    # only. Anything that gets shared, downloaded or attached to a ticket must
+    # use fix_wpconfig_redacted instead.
     fix_wpconfig: str = ""
+    fix_wpconfig_redacted: str = ""
 
 
 def simulate_smtp(provider: str, host: str, port: int, encryption: str,
@@ -913,7 +945,11 @@ def simulate_smtp(provider: str, host: str, port: int, encryption: str,
 
     r.fix_php = smtp_php_fix()
     r.fix_wpconfig = smtp_wpconfig_fix(host, port, encryption, username, password,
-                                       from_addr or username, from_name)
+                                       from_addr or username, from_name,
+                                       redact_password=False)
+    r.fix_wpconfig_redacted = smtp_wpconfig_fix(host, port, encryption, username,
+                                                password, from_addr or username,
+                                                from_name, redact_password=True)
     return r
 
 
@@ -970,6 +1006,11 @@ def build_report(findings: list[Finding] | None,
         if smtp.recommendations:
             lines += ["**Recommendations:**"] + [f"- {rec}" for rec in smtp.recommendations] + [""]
         lines += ["**PHP fix (functions.php):**", "```php", smtp.fix_php.strip(), "```", "",
-                  "**wp-config.php fix:**", "```php", smtp.fix_wpconfig.strip(), "```", ""]
+                  "**wp-config.php fix:**",
+                  "The SMTP password is redacted here so this report is safe to "
+                  "share or attach to a ticket. Copy the real value from the "
+                  "SMTP Delivery Check tab straight into wp-config.php.",
+                  "```php", (smtp.fix_wpconfig_redacted or smtp.fix_wpconfig).strip(),
+                  "```", ""]
 
     return "\n".join(lines)
