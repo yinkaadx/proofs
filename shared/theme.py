@@ -1,6 +1,15 @@
 """Shared visual system: one stylesheet and one set of helpers, so every
 tool in the hub looks like part of the same product.
 
+The palette is deliberately single scheme. `.streamlit/config.toml` pins
+Streamlit to a light theme, and Streamlit exposes no CSS variables for the
+theme it painted, so a `prefers-color-scheme` rule here cannot know what the
+rest of the page looks like. One used to exist, and on a visitor whose device
+was set to dark it produced dark cards on Streamlit's light page with a light
+sidebar. Colours here therefore match the pinned theme, and both must change
+together. tests/test_theme.py enforces that they agree under either device
+setting.
+
 Import `esc` before interpolating anything user supplied into an
 `unsafe_allow_html` block. Pasted markup rendered raw would become live HTML.
 """
@@ -23,19 +32,7 @@ STYLE = """
   --app-ok: #047857;
   --app-card: #ffffff;
   --app-soft: #f8fafc;
-}
-@media (prefers-color-scheme: dark) {
-  :root {
-    --app-ink: #e2e8f0;
-    --app-muted: #94a3b8;
-    --app-line: #334155;
-    --app-accent: #60a5fa;
-    --app-crit: #f87171;
-    --app-warn: #fbbf24;
-    --app-ok: #34d399;
-    --app-card: #111827;
-    --app-soft: #0f172a;
-  }
+  color-scheme: light;
 }
 .app-hero {
   border: 1px solid var(--app-line);

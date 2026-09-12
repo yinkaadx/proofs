@@ -65,15 +65,23 @@ python3 tests/test_hub.py                     # hub, registry and navigation
 python3 tests/test_wp_form_debugger_core.py   # WP Form Debugger engine
 python3 tests/test_app_smoke.py               # WP Form Debugger page
 python3 tests/test_php_syntax.py              # generated PHP parsed by real PHP
+python3 tests/test_theme.py                   # one consistent design, needs a running hub
 ```
 
 Every suite declares its pass and fail markers before running and parses results
 programmatically, so nothing is judged by eye. Clean runs print
-`HUB RESULT: PASS 23/23`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38` and
-`PHP RESULT: PASS 30/30`, and each exits 0. Any failure prints lines beginning
-`FAIL` and exits 1.
+`HUB RESULT: PASS 23/23`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
+`PHP RESULT: PASS 30/30` and `THEME RESULT: PASS 6/6`, and each exits 0. Any
+failure prints lines beginning `FAIL` and exits 1.
 
-`tests/test_php_syntax.py` skips cleanly when no `php` binary is present.
+`tests/test_php_syntax.py` skips cleanly when no `php` binary is present, and
+`tests/test_theme.py` skips cleanly when no hub is running or no browser is
+available. To run it, start the hub first and pass its URL:
+
+```bash
+streamlit run streamlit_app.py --server.port 8503 --server.headless true &
+python3 tests/test_theme.py http://127.0.0.1:8503
+```
 
 ## Layout
 
@@ -100,3 +108,14 @@ by GitHub Pages. They are unrelated to the hub and unaffected by it.
   escaped as a valid PHP string literal.
 - Downloadable reports redact credentials. Redaction is the default in the
   generator, so a caller that forgets cannot leak one.
+
+## One design, not two
+
+The palette in `shared/theme.py` is deliberately single scheme and matches the
+theme pinned in `.streamlit/config.toml`. Streamlit paints its own chrome from
+that config and exposes no CSS variables for it, so a `prefers-color-scheme`
+rule in our stylesheet cannot know what the rest of the page looks like. One
+used to exist, and a visitor whose device was set to dark saw dark cards
+floating on Streamlit's light page beside a light sidebar. Change the config and
+the palette together, and `tests/test_theme.py` will hold them to it by
+measuring real rendered colours under both device settings.
