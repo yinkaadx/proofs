@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.web3_smart_escrow_console.page import render as web3_smart_escrow_console
     from tools.retreat_funnel_redundancy_guard.page import render as retreat_funnel_redundancy_guard
     from tools.sharepoint_zero_trust_simulator.page import render as sharepoint_zero_trust_simulator
     from tools.tv_mt5_bridge_diagnostic.page import render as tv_mt5_bridge_diagnostic
@@ -121,5 +122,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Coaching and retreat marketing",
             render=retreat_funnel_redundancy_guard,
+        ),
+        Tool(
+            key="web3-smart-escrow-console",
+            title="Web3 SmartEscrow Architecture Console",
+            icon="\u26D3",
+            tagline=(
+                "EVM SmartEscrow deployment simulator, Foundry fuzzing ledger, "
+                "and event indexing stream."
+            ),
+            audience="Blockchain engineering",
+            render=web3_smart_escrow_console,
         ),
     ]

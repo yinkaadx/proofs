@@ -44,6 +44,8 @@ PYTEST_SUITES=(
   tests/test_sharepoint_zero_trust_simulator_page.py
   tests/test_retreat_funnel_redundancy_guard.py
   tests/test_retreat_funnel_redundancy_guard_page.py
+  tests/test_web3_smart_escrow_console.py
+  tests/test_web3_smart_escrow_console_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"
