@@ -60,6 +60,10 @@ keys = [t.key for t in tools]
 expect(len(keys) == len(set(keys)), f"tool keys are unique (got {keys})")
 titles = [t.title for t in tools]
 expect(len(titles) == len(set(titles)), f"tool titles are unique (got {titles})")
+icons = [t.icon for t in tools]
+expect(len(icons) == len(set(icons)),
+       f"tool icons are unique, since the landing page and the navigation are "
+       f"read by icon as much as by name (got {icons})")
 for t in tools:
     expect(isinstance(t, Tool), f"{t.key} is a Tool instance")
     expect(bool(re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", t.key)),

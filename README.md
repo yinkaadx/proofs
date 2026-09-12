@@ -32,6 +32,7 @@ by pushing code.
 | --- | --- | --- |
 | [WP Form Debugger](tools/wp_form_debugger/README.md) | `/wp-form-debugger` | Finds why a WordPress form stopped submitting or delivering and returns the exact PHP, JavaScript and wp-config.php fix |
 | [NetSuite HubSpot Idempotent Sync Console](tools/netsuite_hubspot_sync/README.md) | `/netsuite-hubspot-sync` | Deal sync simulator, account matching, SHA256 idempotency ledger and SharePoint audit feed |
+| [Multi Channel Inventory Sync Engine](tools/multi_channel_inventory_sync/README.md) | `/multi-channel-inventory-sync` | Cross platform SKU mapping, stock deduction and negative inventory prevention for Amazon, eBay and Shopify |
 
 ## Adding a tool
 
@@ -69,14 +70,24 @@ python3 tests/test_php_syntax.py              # generated PHP parsed by real PHP
 python3 tests/test_theme.py                   # one consistent design, needs a running hub
 python3 tests/test_netsuite_hubspot_sync.py       # sync engine
 python3 tests/test_netsuite_hubspot_sync_page.py  # sync console page
+python3 tests/test_multi_channel_inventory_sync.py       # inventory engine
+python3 tests/test_multi_channel_inventory_sync_page.py  # inventory console page
+python3 tests/test_browser_inventory_flow.py             # real browser flow, needs a hub
 ```
 
 Every suite declares its pass and fail markers before running and parses results
 programmatically, so nothing is judged by eye. Clean runs print
-`HUB RESULT: PASS 34/34`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
+`HUB RESULT: PASS 46/46`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
 `PHP RESULT: PASS 30/30`, `THEME RESULT: PASS 14/14`,
-`SYNC RESULT: PASS 117/117` and `SYNC UI RESULT: PASS 28/28`, and each exits 0.
-Any failure prints lines beginning `FAIL` and exits 1.
+`SYNC RESULT: PASS 117/117`, `SYNC UI RESULT: PASS 28/28`,
+`INVENTORY RESULT: PASS 132/132`, `INVENTORY UI RESULT: PASS 52/52` and
+`BROWSER RESULT: PASS 11/11`, 632 checks in total, and each exits 0. Any
+failure prints lines beginning `FAIL` and exits 1.
+
+Two suites need a running hub and a browser, and skip cleanly without them:
+`test_theme.py` and `test_browser_inventory_flow.py`. AppTest re-executes the
+script directly and cannot see widget state lost across a real rerun, which is
+why the browser suite exists.
 
 `tests/test_php_syntax.py` skips cleanly when no `php` binary is present, and
 `tests/test_theme.py` skips cleanly when no hub is running or no browser is

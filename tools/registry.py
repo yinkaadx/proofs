@@ -23,6 +23,7 @@ class Tool:
 
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
+    from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
     from tools.wp_form_debugger.page import render as wp_form_debugger
 
@@ -49,5 +50,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Revenue operations",
             render=netsuite_hubspot_sync,
+        ),
+        Tool(
+            key="multi-channel-inventory-sync",
+            title="Multi Channel Inventory Sync Engine",
+            icon="\U0001F4E6",
+            tagline=(
+                "Cross platform SKU mapping, automated stock deduction, and "
+                "negative inventory prevention for Amazon, eBay, and Shopify."
+            ),
+            audience="Ecommerce operations",
+            render=multi_channel_inventory_sync,
         ),
     ]
