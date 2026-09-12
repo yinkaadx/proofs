@@ -24,6 +24,7 @@ class Tool:
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
+    from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
     from tools.wp_form_debugger.page import render as wp_form_debugger
 
@@ -61,5 +62,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Ecommerce operations",
             render=multi_channel_inventory_sync,
+        ),
+        Tool(
+            key="zero-trust-rmm-console",
+            title="Zero Trust Remote Access Console",
+            icon="\U0001F510",
+            tagline=(
+                "Multitenant RBAC simulator, MFA enforcement ledger, and Ad hoc "
+                "session code generator."
+            ),
+            audience="Managed IT services",
+            render=zero_trust_rmm_console,
         ),
     ]
