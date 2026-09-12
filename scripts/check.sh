@@ -36,6 +36,8 @@ BROWSER_SUITES=(
 PYTEST_SUITES=(
   tests/test_zero_trust_rmm_console.py
   tests/test_zero_trust_rmm_console_page.py
+  tests/test_pod_automation_router.py
+  tests/test_pod_automation_router_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"

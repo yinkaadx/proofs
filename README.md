@@ -55,6 +55,7 @@ reboot, not a fix.
 | [NetSuite HubSpot Idempotent Sync Console](tools/netsuite_hubspot_sync/README.md) | `/netsuite-hubspot-sync` | Deal sync simulator, account matching, SHA256 idempotency ledger and SharePoint audit feed |
 | [Multi Channel Inventory Sync Engine](tools/multi_channel_inventory_sync/README.md) | `/multi-channel-inventory-sync` | Cross platform SKU mapping, stock deduction and negative inventory prevention for Amazon, eBay and Shopify |
 | [Zero Trust Remote Access Console](tools/zero_trust_rmm_console/README.md) | `/zero-trust-rmm-console` | Multitenant RBAC simulator, MFA enforcement ledger and ad hoc session code generator |
+| [Print on Demand Automation Router](tools/pod_automation_router/README.md) | `/pod-automation-router` | WooCommerce payload routing, Printful fulfilment simulation and multi channel tracking sync |
 
 ## Adding a tool
 

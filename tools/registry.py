@@ -24,6 +24,7 @@ class Tool:
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
+    from tools.pod_automation_router.page import render as pod_automation_router
     from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
     from tools.wp_form_debugger.page import render as wp_form_debugger
@@ -73,5 +74,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Managed IT services",
             render=zero_trust_rmm_console,
+        ),
+        Tool(
+            key="pod-automation-router",
+            title="Print on Demand Automation Router",
+            icon="\U0001F5A8",
+            tagline=(
+                "WooCommerce order payload routing, Printful API fulfillment "
+                "simulation, and multi channel tracking synchronization."
+            ),
+            audience="Ecommerce operations",
+            render=pod_automation_router,
         ),
     ]
