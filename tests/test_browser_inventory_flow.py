@@ -35,6 +35,8 @@ ONE_UNIT_SKU = "CEN-TST-007"
 
 try:
     from playwright.sync_api import sync_playwright
+
+    from tests.browser_util import act, choose, launch, open_tab, open_tool
 except ImportError:
     print("BROWSER RESULT: SKIP (playwright not installed)")
     sys.exit(0)
@@ -68,45 +70,41 @@ with sync_playwright() as p:
         sys.exit(0)
 
     page = browser.new_context(viewport={"width": 1440, "height": 1100}).new_page()
-    page.goto(BASE + TOOL, wait_until="networkidle", timeout=60000)
-    page.wait_for_selector("text=Central SKU ledger", timeout=30000)
-    page.wait_for_timeout(2500)
+    open_tool(page, BASE, TOOL, "Central SKU ledger")
 
     expect("Multi Channel Inventory Sync Engine" in page.content(),
            "the tool loads at its own URL path")
 
-    page.get_by_role("tab", name="Channel Sales").click()
-    page.wait_for_timeout(1500)
+    open_tab(page, "Channel Sales")
 
     combo = page.get_by_role("combobox", name="Product to sell", exact=True)
-    expect(combo.count() == 1,
-           f"exactly one control answers to 'Product to sell' (got {combo.count()})")
+    combo.first.wait_for(state="visible", timeout=15000)
+    # Query once. Calling count() in both the condition and the message let the
+    # page change between the two calls, which produced a failure that reported
+    # a passing value.
+    combo_count = combo.count()
+    expect(combo_count == 1,
+           f"exactly one control answers to 'Product to sell' (got {combo_count})")
 
-    combo.click()
-    page.wait_for_timeout(1200)
-    page.get_by_role("option", name=ONE_UNIT_SKU, exact=False).click()
-    page.wait_for_timeout(2500)
+    choose(page, "Product to sell", ONE_UNIT_SKU)
     selected = page.get_by_role("combobox", name="Product to sell", exact=True).input_value()
     expect(ONE_UNIT_SKU in selected,
            f"the one unit product is selected (got {selected!r})")
 
     outcomes = []
     for attempt in (1, 2, 3):
-        page.get_by_role("button", name="Order from eBay").click()
-        page.wait_for_timeout(4500)
+        act(page, page.get_by_role("button", name="Order from eBay"))
         held = page.get_by_role("combobox", name="Product to sell", exact=True).input_value()
         expect(ONE_UNIT_SKU in held,
                f"after sale {attempt} the selection still reads {ONE_UNIT_SKU} "
                f"(got {held!r})")
-        page.get_by_role("tab", name="Sync Broadcast").click()
-        page.wait_for_timeout(1800)
+        open_tab(page, "Sync Broadcast")
         content = page.content()
         outcomes.append({
             "blocked": "INSUFFICIENT_STOCK" in content,
             "guard": "Negative stock guard tripped" in content,
         })
-        page.get_by_role("tab", name="Channel Sales").click()
-        page.wait_for_timeout(1200)
+        open_tab(page, "Channel Sales")
 
     expect(not outcomes[0]["blocked"],
            "the first sale of the only unit is accepted")
@@ -117,8 +115,7 @@ with sync_playwright() as p:
     expect(outcomes[2]["blocked"],
            "a third attempt is blocked too, so the guard is not a one shot")
 
-    page.get_by_role("tab", name="Inventory Ledger").click()
-    page.wait_for_timeout(2000)
+    open_tab(page, "Inventory Ledger")
     ledger_text = page.inner_text("body")
     expect("No SKU has ever gone below zero" in ledger_text,
            "the ledger still reports that nothing went negative")

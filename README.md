@@ -60,7 +60,27 @@ http://localhost:8501/<key>.
 
 ## Tests
 
-Run from the repository root:
+One command runs everything and prints a single summary:
+
+```bash
+scripts/check.sh          # every suite, about 17 seconds
+scripts/check.sh fast     # skip the two browser suites, about 8 seconds
+```
+
+It reuses a hub on port 8600 if one is already running and starts one only if
+needed, because starting Streamlit and waiting for it to answer was a large
+part of the wall clock on earlier builds.
+
+To add a tool, generate its scaffold rather than writing the eight files by
+hand, then replace the placeholders:
+
+```bash
+python3 scripts/new_tool.py --key my-tool --title "My Tool" \
+    --tagline "What it does, in one sentence." \
+    --audience "Who it is for" --icon "🧰"
+```
+
+Individual suites, run from the repository root:
 
 ```bash
 python3 tests/test_hub.py                     # hub, registry and navigation

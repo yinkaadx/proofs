@@ -31,6 +31,8 @@ CHROME = "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"
 
 try:
     from playwright.sync_api import sync_playwright
+
+    from tests.browser_util import act, open_tool
 except ImportError:
     print("THEME RESULT: SKIP (playwright not installed)")
     sys.exit(0)
@@ -130,10 +132,8 @@ with sync_playwright() as p:
         context = browser.new_context(viewport={"width": 1440, "height": 1000},
                                       color_scheme=scheme)
         page = context.new_page()
-        page.goto(f"{BASE}/wp-form-debugger", wait_until="networkidle", timeout=60000)
-        page.wait_for_selector("text=Paste your form HTML", timeout=30000)
-        page.get_by_text("Load broken sample").first.click()
-        page.wait_for_timeout(3500)
+        open_tool(page, BASE, "/wp-form-debugger", "Paste your form HTML")
+        act(page, page.get_by_text("Load broken sample").first)
         measured = page.evaluate(MEASURE)
         page_text[scheme] = page.evaluate(MEASURE_TEXT)
         context.close()
