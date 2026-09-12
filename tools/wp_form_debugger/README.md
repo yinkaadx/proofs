@@ -40,12 +40,15 @@ runs in the session.
 
 ## Run locally
 
+This tool is a page inside the Toolbench hub. From the repository root:
+
 ```bash
 pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-The app serves on http://localhost:8501.
+The hub serves on http://localhost:8501 and the tool is at
+http://localhost:8501/wp-form-debugger.
 
 ## Generated code is a fragment, and the password stays out of the report
 
@@ -66,10 +69,12 @@ broken site or a leaked credential:
 
 ## Tests
 
+Run from the repository root:
+
 ```bash
-python3 test_wpfd_core.py    # engine logic
-python3 test_app_smoke.py    # UI, via Streamlit's AppTest harness
-python3 test_php_syntax.py   # every generated PHP snippet parsed by real PHP
+python3 tests/test_wp_form_debugger_core.py   # engine logic
+python3 tests/test_app_smoke.py               # UI, via Streamlit's AppTest harness
+python3 tests/test_php_syntax.py              # generated PHP parsed by real PHP
 ```
 
 Each suite declares its pass and fail markers before running and parses results
@@ -86,13 +91,11 @@ cleanly when no `php` binary is present.
 
 | File | Purpose |
 | --- | --- |
-| `streamlit_app.py` | User interface, four tabs, styling and report download |
-| `wpfd_core.py` | Analysis engine: HTML audit, issue library, SMTP simulation, report builder |
-| `test_wpfd_core.py` | Engine test suite, 164 checks |
-| `test_app_smoke.py` | UI test suite via AppTest, 38 checks |
-| `test_php_syntax.py` | Real PHP parse check of every generated snippet, 30 checks |
-| `requirements.txt` | Runtime dependencies |
-| `.streamlit/config.toml` | Theme and client settings |
+| `page.py` | The page: four tabs, and the report download |
+| `core.py` | Analysis engine: HTML audit, issue library, SMTP simulation, report builder |
+| `../../tests/test_wp_form_debugger_core.py` | Engine test suite, 164 checks |
+| `../../tests/test_app_smoke.py` | UI test suite via AppTest, 38 checks |
+| `../../tests/test_php_syntax.py` | Real PHP parse check of every generated snippet, 30 checks |
 
-The engine has no Streamlit dependency, so it can be reused behind a CLI, an API
+`core.py` has no Streamlit dependency, so it can be reused behind a CLI, an API
 or a scheduled audit without changes.

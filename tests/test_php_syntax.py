@@ -17,10 +17,12 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from pathlib import Path as _P
+sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
 import tempfile
 from pathlib import Path
 
-from wpfd_core import (
+from tools.wp_form_debugger.core import (
     KNOWN_ISSUES,
     SAMPLE_BROKEN_HTML,
     SAMPLE_HEALTHY_HTML,

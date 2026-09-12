@@ -13,8 +13,10 @@ Fail marker: any line starting "FAIL:" and exit code 1.
 from __future__ import annotations
 
 import sys
+from pathlib import Path as _P
+sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
 
-from wpfd_core import (
+from tools.wp_form_debugger.core import (
     KNOWN_ISSUES,
     PROVIDERS,
     SAMPLE_BROKEN_HTML,

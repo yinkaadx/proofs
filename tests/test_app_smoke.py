@@ -1,9 +1,9 @@
-"""UI smoke tests: run streamlit_app.py through Streamlit's own AppTest harness.
+"""UI smoke tests for the WP Form Debugger page, via Streamlit's AppTest harness.
 
 Pass and fail markers are declared before execution. Every scenario asserts that
 the script ran with zero uncaught exceptions and that named content rendered.
 
-Run: python3 test_app_smoke.py
+Run: python3 tests/test_app_smoke.py
 Pass marker: final line is exactly "UI RESULT: PASS <n>/<n>" and exit code 0.
 Fail marker: any line starting "FAIL:" and exit code 1.
 """
@@ -11,16 +11,19 @@ Fail marker: any line starting "FAIL:" and exit code 1.
 from __future__ import annotations
 
 import sys
+from pathlib import Path
+from pathlib import Path as _P
+sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
 
 from streamlit.testing.v1 import AppTest
 
-from wpfd_core import SAMPLE_BROKEN_HTML, SAMPLE_HEALTHY_HTML
+from tools.wp_form_debugger.core import SAMPLE_BROKEN_HTML, SAMPLE_HEALTHY_HTML
 
 failures: list[str] = []
 checks = 0
 
 # Synthetic fixtures, assembled at runtime so no credential shaped literal is
-# committed. See the same note in test_wpfd_core.py. Nothing here is real.
+# committed. See the same note in test_wp_form_debugger_core.py. Nothing here is real.
 FX_HOST = ".".join(("smtp", "acme", "io"))
 FX_USER = "@".join(("post", "acme.io"))
 FX_FROM = "@".join(("no-reply", "acme.io"))
@@ -49,7 +52,9 @@ def text_of(at: AppTest) -> str:
 
 
 def run(timeout: int = 90) -> AppTest:
-    at = AppTest.from_file("streamlit_app.py", default_timeout=timeout)
+    """Drive the tool's own page function, exactly as the hub renders it."""
+    harness = Path(__file__).resolve().parent / "_page_harness_wp_form_debugger.py"
+    at = AppTest.from_file(str(harness), default_timeout=timeout)
     at.run()
     return at
 
