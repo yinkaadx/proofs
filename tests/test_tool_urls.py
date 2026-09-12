@@ -98,6 +98,16 @@ with sync_playwright() as p:
         expect("Traceback" not in content and "StreamlitAPIException" not in content,
                f"/{tool.key} renders without an exception on screen")
 
+        # The sidebar reads tool list, then this tool's own instructions, then
+        # the hub name plate. The help is what a person reaches for while using
+        # a tool, so it sits with the tools rather than below the branding.
+        sidebar = page.locator('section[data-testid="stSidebar"]').inner_text()
+        help_at = sidebar.find("How to use")
+        plate_at = sidebar.find(f"build {expected_build}")
+        expect(0 <= help_at < plate_at,
+               f"/{tool.key} puts its How to use steps above the hub name "
+               f"plate (help at {help_at}, name plate at {plate_at})")
+
     # A path that genuinely does not exist must still be reported as missing,
     # otherwise the two checks above would pass for any URL at all.
     page.goto(f"{BASE.rstrip('/')}/definitely-not-a-tool",

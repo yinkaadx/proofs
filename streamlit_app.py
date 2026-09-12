@@ -65,12 +65,17 @@ TOOL_PAGES = [
 
 HOME_PAGE = st.Page(home, title="Home", icon="🧰", url_path="home", default=True)
 
+# The page runs first so that its own sidebar content, which is the "How to
+# use" steps for the tool currently open, sits directly under the tool list
+# rather than below the hub's name plate. The help is what a person reaches for
+# while using a tool; the name plate is not, so it goes last.
+st.navigation({"Overview": [HOME_PAGE], "Tools": TOOL_PAGES}).run()
+
 with st.sidebar:
+    st.divider()
     st.markdown("### Toolbench")
     st.caption("Diagnostic tools for client work.")
     # State the running build. A hosted Streamlit app can serve an old commit
     # without saying so, which has already caused a tool to be reported live at
     # a URL the running app had never heard of.
     st.caption(build_label())
-
-st.navigation({"Overview": [HOME_PAGE], "Tools": TOOL_PAGES}).run()

@@ -113,6 +113,9 @@ def render() -> None:
         unsafe_allow_html=True,
     )
 
+    # The hub renders its name plate after the page, so whatever this block
+    # writes lands directly under the tool list. Keep "How to use" first: it is
+    # what someone reaches for while using the tool.
     with st.sidebar:
         st.subheader("How to use")
         st.markdown("Replace this with the real steps.")
