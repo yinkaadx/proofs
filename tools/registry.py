@@ -23,6 +23,7 @@ class Tool:
 
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
+    from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
     from tools.wp_form_debugger.page import render as wp_form_debugger
 
     return [
@@ -37,5 +38,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="WordPress support",
             render=wp_form_debugger,
+        ),
+        Tool(
+            key="netsuite-hubspot-sync",
+            title="NetSuite HubSpot Idempotent Sync Console",
+            icon="🔁",
+            tagline=(
+                "Deal sync simulator, account matching logic, SHA256 idempotency "
+                "ledger, and SharePoint audit feed."
+            ),
+            audience="Revenue operations",
+            render=netsuite_hubspot_sync,
         ),
     ]

@@ -95,6 +95,7 @@ STYLE = """
 .app-card.crit { border-left: 4px solid var(--app-crit); }
 .app-card.warn { border-left: 4px solid var(--app-warn); }
 .app-card.info { border-left: 4px solid var(--app-accent); }
+.app-card.ok { border-left: 4px solid var(--app-ok); }
 .app-card h4 { margin: 0 0 .35rem 0; font-size: 1rem; color: var(--app-ink); }
 .app-card p { margin: .3rem 0; color: var(--app-ink); font-size: .9rem; line-height: 1.55; }
 .app-tag {
@@ -105,6 +106,7 @@ STYLE = """
 .app-tag.crit { background: color-mix(in srgb, var(--app-crit) 14%, transparent); color: var(--app-crit); }
 .app-tag.warn { background: color-mix(in srgb, var(--app-warn) 14%, transparent); color: var(--app-warn); }
 .app-tag.info { background: color-mix(in srgb, var(--app-accent) 14%, transparent); color: var(--app-accent); }
+.app-tag.ok { background: color-mix(in srgb, var(--app-ok) 14%, transparent); color: var(--app-ok); }
 .app-ev {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: .8rem; background: var(--app-soft);

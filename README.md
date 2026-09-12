@@ -31,6 +31,7 @@ by pushing code.
 | Tool | Path | What it does |
 | --- | --- | --- |
 | [WP Form Debugger](tools/wp_form_debugger/README.md) | `/wp-form-debugger` | Finds why a WordPress form stopped submitting or delivering and returns the exact PHP, JavaScript and wp-config.php fix |
+| [NetSuite HubSpot Idempotent Sync Console](tools/netsuite_hubspot_sync/README.md) | `/netsuite-hubspot-sync` | Deal sync simulator, account matching, SHA256 idempotency ledger and SharePoint audit feed |
 
 ## Adding a tool
 
@@ -66,13 +67,16 @@ python3 tests/test_wp_form_debugger_core.py   # WP Form Debugger engine
 python3 tests/test_app_smoke.py               # WP Form Debugger page
 python3 tests/test_php_syntax.py              # generated PHP parsed by real PHP
 python3 tests/test_theme.py                   # one consistent design, needs a running hub
+python3 tests/test_netsuite_hubspot_sync.py       # sync engine
+python3 tests/test_netsuite_hubspot_sync_page.py  # sync console page
 ```
 
 Every suite declares its pass and fail markers before running and parses results
 programmatically, so nothing is judged by eye. Clean runs print
-`HUB RESULT: PASS 23/23`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
-`PHP RESULT: PASS 30/30` and `THEME RESULT: PASS 14/14`, and each exits 0. Any
-failure prints lines beginning `FAIL` and exits 1.
+`HUB RESULT: PASS 34/34`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
+`PHP RESULT: PASS 30/30`, `THEME RESULT: PASS 14/14`,
+`SYNC RESULT: PASS 117/117` and `SYNC UI RESULT: PASS 28/28`, and each exits 0.
+Any failure prints lines beginning `FAIL` and exits 1.
 
 `tests/test_php_syntax.py` skips cleanly when no `php` binary is present, and
 `tests/test_theme.py` skips cleanly when no hub is running or no browser is
