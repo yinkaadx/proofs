@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.sharepoint_zero_trust_simulator.page import render as sharepoint_zero_trust_simulator
     from tools.tv_mt5_bridge_diagnostic.page import render as tv_mt5_bridge_diagnostic
     from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
@@ -97,5 +98,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Algorithmic trading",
             render=tv_mt5_bridge_diagnostic,
+        ),
+        Tool(
+            key="sharepoint-zero-trust-simulator",
+            title="Secure SharePoint Architecture Console",
+            icon="\U0001F6E1",
+            tagline=(
+                "Entra ID authentication simulator, role based access matrix, "
+                "and secure deployment checklist."
+            ),
+            audience="Microsoft 365 security",
+            render=sharepoint_zero_trust_simulator,
         ),
     ]
