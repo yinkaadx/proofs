@@ -24,6 +24,7 @@ class Tool:
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
+    from tools.aerial_insights_qa_console.page import render as aerial_insights_qa_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -193,5 +194,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Waste logistics operations",
             render=wastetab_dispatch_engine,
+        ),
+        Tool(
+            key="aerial-insights-qa-console",
+            title="Aerial Insights QA & Production Console",
+            icon="\U0001F6F0",
+            tagline=(
+                "Background worker diagnostics, Prisma connection pooling "
+                "auditor, and Stripe idempotency ledger."
+            ),
+            audience="Platform engineering",
+            render=aerial_insights_qa_console,
         ),
     ]

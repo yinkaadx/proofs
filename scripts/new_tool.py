@@ -22,6 +22,7 @@ checks, and start replacing the placeholders with real logic.
 from __future__ import annotations
 
 import argparse
+import html
 import re
 import sys
 from pathlib import Path
@@ -106,7 +107,7 @@ def render() -> None:
     st.markdown(
         """
 <div class="app-hero">
-  <h1>{title}</h1>
+  <h1>{html_title}</h1>
   <p>{tagline}</p>
 </div>
 """,
@@ -139,7 +140,7 @@ def render() -> None:
     st.markdown(
         f"""
 <div class="app-foot">
-{title}, engine version {{ENGINE_VERSION}}. A simulator: nothing you enter
+{html_title}, engine version {{ENGINE_VERSION}}. A simulator: nothing you enter
 leaves this session.
 </div>
 """,
@@ -284,7 +285,7 @@ at = run()
 expect(not at.exception,
        f"page renders with no exception (got {{[str(e.value) for e in at.exception]}})")
 body = text_of(at)
-expect("{title}" in body, "hero renders")
+expect("{html_title}" in body, "hero renders")
 
 print("== Widget labels are unambiguous ==")
 labels = [str(el.label) for el in at.selectbox]
@@ -364,6 +365,11 @@ def main() -> int:
         "key": args.key, "title": args.title, "tagline": args.tagline,
         "audience": args.audience, "icon": args.icon, "module": module,
         "marker": marker,
+        # The hero is raw HTML, so a title carrying an ampersand has to be
+        # escaped on the way in. Writing it by hand is how two tools ended up
+        # rendering under a different name than the one they are registered
+        # with, which the URL proof caught both times.
+        "html_title": html.escape(args.title),
     }
 
     package.mkdir(parents=True)
