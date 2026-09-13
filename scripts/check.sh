@@ -52,6 +52,8 @@ PYTEST_SUITES=(
   tests/test_reventure_conversion_engine_page.py
   tests/test_airtable_whatsapp_automation_guard.py
   tests/test_airtable_whatsapp_automation_guard_page.py
+  tests/test_m365_intranet_architecture_console.py
+  tests/test_m365_intranet_architecture_console_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"
