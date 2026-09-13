@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.ten_dlc_compliance_validator.page import render as ten_dlc_compliance_validator
     from tools.web3_smart_escrow_console.page import render as web3_smart_escrow_console
     from tools.retreat_funnel_redundancy_guard.page import render as retreat_funnel_redundancy_guard
     from tools.sharepoint_zero_trust_simulator.page import render as sharepoint_zero_trust_simulator
@@ -133,5 +134,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Blockchain engineering",
             render=web3_smart_escrow_console,
+        ),
+        Tool(
+            key="ten-dlc-compliance-validator",
+            title="10DLC Campaign Registry Compliance Validator",
+            icon="\U0001F4F2",
+            tagline=(
+                "A2P 10DLC brand and campaign registration simulator ensuring "
+                "exact TCR approval standards."
+            ),
+            audience="SMS compliance",
+            render=ten_dlc_compliance_validator,
         ),
     ]

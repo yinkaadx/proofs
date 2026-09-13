@@ -46,6 +46,8 @@ PYTEST_SUITES=(
   tests/test_retreat_funnel_redundancy_guard_page.py
   tests/test_web3_smart_escrow_console.py
   tests/test_web3_smart_escrow_console_page.py
+  tests/test_ten_dlc_compliance_validator.py
+  tests/test_ten_dlc_compliance_validator_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"
