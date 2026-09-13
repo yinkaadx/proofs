@@ -7,6 +7,7 @@ nothing else needs editing and no redeploy is required: a push is enough.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -19,6 +20,32 @@ class Tool:
     tagline: str       # one line on the landing card
     audience: str      # who it is for, shown as a pill
     render: Callable[[], None]
+
+
+def _padding() -> int:
+    """How many synthetic tools to append, for layout tests only.
+
+    The sidebar once hid each tool's instructions behind a list that grew by a
+    row every week. A test that measures sixteen tools would have passed every
+    week until the week it did not, so the guard has to prove the layout is
+    independent of the count rather than acceptable at today's count. This hook
+    is how it grows the list to forty without inventing forty tools.
+    """
+    raw = os.environ.get("TOOLBENCH_PAD_TOOLS", "")
+    return int(raw) if raw.isdigit() and 0 < int(raw) <= 200 else 0
+
+
+def _placeholder(title: str):
+    def render() -> None:
+        import streamlit as st
+
+        st.markdown(f"### {title}")
+        st.caption("A synthetic tool. It exists only to lengthen the tool list "
+                   "while a layout test measures whether that moves anything.")
+        with st.sidebar:
+            st.subheader("How to use")
+            st.markdown("Nothing to use. This tool is scaffolding for a test.")
+    return render
 
 
 def all_tools() -> list[Tool]:
@@ -218,4 +245,14 @@ def all_tools() -> list[Tool]:
             audience="Bespoke tailoring",
             render=askew_suit_engine,
         ),
+    ] + [
+        Tool(
+            key=f"synthetic-{index:02d}",
+            title=f"Synthetic Tool {index:02d}",
+            icon="\u2699",
+            tagline="Scaffolding for a layout test, not a real tool.",
+            audience="Tests",
+            render=_placeholder(f"Synthetic Tool {index:02d}"),
+        )
+        for index in range(1, _padding() + 1)
     ]

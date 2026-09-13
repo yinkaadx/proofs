@@ -8,6 +8,9 @@
 #
 # Usage:  scripts/check.sh            run everything
 #         scripts/check.sh fast       skip the browser suites
+#
+# In full mode the browser suites are mandatory: TOOLBENCH_REQUIRE_BROWSER=1 is
+# exported so a missing browser fails the gate instead of skipping quietly.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -30,6 +33,13 @@ BROWSER_SUITES=(
   tests/test_tool_urls.py
   tests/test_theme.py
   tests/test_browser_inventory_flow.py
+)
+
+# Browser suites that start their own servers, so they take no base URL. The
+# sidebar invariant needs two hubs at once, one of them with a padded tool
+# list, which is not something the shared hub on ${PORT} can be.
+SELF_HOSTED_BROWSER_SUITES=(
+  tests/test_sidebar_invariant.py
 )
 
 # Suites written for pytest rather than the standalone script style.
@@ -152,8 +162,16 @@ for suite in "${UNIT_SUITES[@]}"; do run_suite "$suite"; done
 run_pytest "${PYTEST_SUITES[@]}"
 
 if [ "$MODE" != "fast" ]; then
+  # A guard that skips itself is not a guard. Both browser suites exit 0 with a
+  # SKIP line when Playwright or a hub is missing, which is right for a
+  # developer running one by hand and wrong for the gate: it would report a
+  # clean pass on a machine where the layout was never measured at all. Setting
+  # this turns every skip in those suites into a failure. Fast mode remains the
+  # way to deliberately not run them.
+  export TOOLBENCH_REQUIRE_BROWSER=1
   ensure_hub || exit 1
   for suite in "${BROWSER_SUITES[@]}"; do run_suite "$suite" "$BASE"; done
+  for suite in "${SELF_HOSTED_BROWSER_SUITES[@]}"; do run_suite "$suite"; done
 else
   echo "  (browser suites skipped: fast mode)"
 fi

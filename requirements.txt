@@ -1,2 +1,8 @@
-streamlit>=1.40
+# 1.63 is the floor because streamlit_app.py passes position= to
+# st.navigation, which older releases do not accept: on an older resolve
+# the app raises a TypeError at boot on every page rather than merely
+# looking wrong. 1.63.0 is the version this was verified against; the
+# floor is the verified version rather than a guess at the first release
+# that added the parameter.
+streamlit>=1.63,<2
 beautifulsoup4>=4.12

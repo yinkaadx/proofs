@@ -19,6 +19,7 @@ Skips cleanly (exit 0) when the browser or the hub is unavailable.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -31,24 +32,35 @@ BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8600"
 
 # A laptop, not a tall desktop. The sidebar failure this suite now guards
 # against only appears once the window is a realistic height.
-VIEWPORT_HEIGHT = 720
+VIEWPORTS = ((1440, 720), (1200, 800))
 # The help must start within this many pixels of the top of the sidebar. It is
 # a budget, not a preference: at 563px the old layout was still technically on
 # screen at this height, and two more tools would have ended that.
 HELP_MUST_START_ABOVE = 200
 
+REQUIRE_BROWSER = os.environ.get("TOOLBENCH_REQUIRE_BROWSER") == "1"
+
+
+def unavailable(reason: str) -> None:
+    """Skip, or fail if this run was told the browser guard is mandatory."""
+    if REQUIRE_BROWSER:
+        print(f"URL RESULT: FAIL (browser guard required but unavailable: "
+              f"{reason})")
+        sys.exit(1)
+    print(f"URL RESULT: SKIP ({reason})")
+    sys.exit(0)
+
+
 try:
     from playwright.sync_api import sync_playwright
 
-    from tests.browser_util import (hub_is_up, launch, open_tool,
-                                    settle, sidebar_position)
+    from tests.browser_util import (hub_is_up, launch, open_tool, settle,
+                                    sidebar_block)
 except ImportError:
-    print("URL RESULT: SKIP (playwright not installed)")
-    sys.exit(0)
+    unavailable("playwright not installed")
 
 if not hub_is_up(BASE):
-    print(f"URL RESULT: SKIP (no hub running at {BASE})")
-    sys.exit(0)
+    unavailable(f"no hub running at {BASE}")
 
 failures: list[str] = []
 checks = 0
@@ -97,15 +109,40 @@ def expect(condition: bool, label: str) -> None:
         failures.append(label)
 
 
+def check_help_block(page, tool, viewport: str) -> None:
+    """Assert the whole How to use block is readable without scrolling.
+
+    Two assertions, and the difference between them is the bug that shipped
+    twice. The first is that the block ENDS on screen: a heading at 100px whose
+    last step runs past the fold is a block the reader cannot finish, and an
+    assertion on the heading alone reports that as fine. The second is that it
+    STARTS near the top, which is what stops the block being pushed down one
+    registry entry at a time as tools are added.
+    """
+    where = sidebar_block(page, "How to use")
+    expect(where.get("found") is True,
+           f"[{viewport}] /{tool.key} has a How to use block in the sidebar")
+    if not where.get("found"):
+        return
+    expect(where["bottom"] <= where["visibleHeight"],
+           f"[{viewport}] /{tool.key} shows its whole How to use block without "
+           f"scrolling (ends at {where['bottom']}px of {where['visibleHeight']}"
+           f"px visible)")
+    expect(0 <= where["top"] < HELP_MUST_START_ABOVE,
+           f"[{viewport}] /{tool.key} starts its How to use block in the first "
+           f"{HELP_MUST_START_ABOVE}px of the sidebar (starts at "
+           f"{where['top']}px), so a growing tool list cannot push it down")
+
+
 TOOLS = all_tools()
 print(f"== Every registered tool resolves at its own URL ({len(TOOLS)} tools) ==")
 
 with sync_playwright() as p:
     try:
-        browser, page = launch(p, viewport={"width": 1440, "height": VIEWPORT_HEIGHT})
+        browser, page = launch(p, viewport={"width": VIEWPORTS[0][0],
+                                            "height": VIEWPORTS[0][1]})
     except Exception as exc:  # noqa: BLE001
-        print(f"URL RESULT: SKIP (browser unavailable: {exc})")
-        sys.exit(0)
+        unavailable(f"browser unavailable: {exc}")
 
     # The landing page must list every tool, so nothing is published without a
     # way in from the front door.
@@ -138,26 +175,18 @@ with sync_playwright() as p:
         expect("Traceback" not in content and "StreamlitAPIException" not in content,
                f"/{tool.key} renders without an exception on screen")
 
-        # The tool's own instructions have to be VISIBLE, not merely ordered
-        # ahead of something else. The previous version of this check compared
-        # string offsets and passed happily while the help sat hundreds of
-        # pixels below the fold behind a list of sixteen tools. Order is not
-        # visibility, and only pixels can tell the difference.
-        where = sidebar_position(page, "How to use")
-        expect(where.get("found") is True,
-               f"/{tool.key} has How to use steps in the sidebar")
-        if where.get("found"):
-            expect(0 <= where["top"] < where["visibleHeight"],
-                   f"/{tool.key} shows its How to use steps without scrolling "
-                   f"(top {where['top']}px of {where['visibleHeight']}px "
-                   f"visible)")
-            # Near the top, not merely on screen. A margin this tight cannot be
-            # eaten by the next tool added to the registry, which is precisely
-            # how the old layout decayed one tool at a time.
-            expect(where["top"] < HELP_MUST_START_ABOVE,
-                   f"/{tool.key} puts its How to use steps in the first "
-                   f"{HELP_MUST_START_ABOVE}px of the sidebar (starts at "
-                   f"{where['top']}px), so the tool list cannot push them down")
+        check_help_block(page, tool, f"{VIEWPORTS[0][0]}x{VIEWPORTS[0][1]}")
+
+    # The same help check at a shorter, narrower window. One viewport is not a
+    # measurement, it is an anecdote: the old layout cleared 1200x800 by nine
+    # pixels.
+    width, height = VIEWPORTS[1]
+    page.set_viewport_size({"width": width, "height": height})
+    for tool in TOOLS:
+        page.goto(f"{BASE.rstrip('/')}/{tool.key}",
+                  wait_until="domcontentloaded", timeout=60000)
+        settle(page)
+        check_help_block(page, tool, f"{width}x{height}")
 
     # A path that genuinely does not exist must still be reported as missing,
     # otherwise the two checks above would pass for any URL at all.

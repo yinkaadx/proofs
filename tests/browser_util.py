@@ -147,3 +147,49 @@ def visible_without_scrolling(page, phrase: str) -> bool:
     if not where.get("found"):
         return False
     return 0 <= where["top"] < where["visibleHeight"]
+
+
+# Where a whole sidebar block ends, not merely where its heading begins.
+# A heading can sit comfortably on screen while the steps under it are clipped,
+# which is the same mistake as asserting order instead of position: it measures
+# something adjacent to what the reader actually needs.
+BLOCK_BOTTOM = """(phrase) => {
+  const sidebar = document.querySelector('div[data-testid="stSidebarContent"]');
+  if (!sidebar) return null;
+  const heading = [...sidebar.querySelectorAll('h1,h2,h3,h4,h5,h6')]
+      .find(h => (h.innerText || '').trim().startsWith(phrase));
+  if (!heading) return {found: false};
+  const start = heading.closest('[data-testid="stElementContainer"]') || heading;
+  let last = start;
+  for (let el = start.nextElementSibling; el; el = el.nextElementSibling) {
+    // A divider closes the block. Everything after it belongs to something else.
+    if (el.querySelector('[data-testid="stDivider"], hr')) break;
+    if (el.querySelector('h1,h2,h3,h4,h5,h6')) break;
+    last = el;
+  }
+  const frame = sidebar.getBoundingClientRect();
+  return {
+    found: true,
+    top: Math.round(start.getBoundingClientRect().top - frame.top),
+    bottom: Math.round(last.getBoundingClientRect().bottom - frame.top),
+    visibleHeight: Math.round(sidebar.clientHeight),
+  };
+}"""
+
+
+def sidebar_block(page, heading: str) -> dict:
+    """Measure a sidebar block from its heading through to its last element.
+
+    Returns found/top/bottom/visibleHeight. `bottom` is what matters: a block
+    whose heading is at 100px and whose final step ends at 900px in an 800px
+    window is a block the reader cannot finish.
+    """
+    return page.evaluate(BLOCK_BOTTOM, heading) or {"found": False}
+
+
+def block_fully_visible(page, heading: str) -> bool:
+    """Whether every line of a block is on screen without scrolling."""
+    where = sidebar_block(page, heading)
+    if not where.get("found"):
+        return False
+    return 0 <= where["top"] and where["bottom"] <= where["visibleHeight"]
