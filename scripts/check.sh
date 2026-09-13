@@ -50,6 +50,8 @@ PYTEST_SUITES=(
   tests/test_ten_dlc_compliance_validator_page.py
   tests/test_reventure_conversion_engine.py
   tests/test_reventure_conversion_engine_page.py
+  tests/test_airtable_whatsapp_automation_guard.py
+  tests/test_airtable_whatsapp_automation_guard_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"

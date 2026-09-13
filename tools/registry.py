@@ -24,6 +24,7 @@ class Tool:
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
+    from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.pod_automation_router.page import render as pod_automation_router
     from tools.reventure_conversion_engine.page import render as reventure_conversion_engine
     from tools.ten_dlc_compliance_validator.page import render as ten_dlc_compliance_validator
@@ -157,5 +158,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Mobile product engineering",
             render=reventure_conversion_engine,
+        ),
+        Tool(
+            key="airtable-whatsapp-automation-guard",
+            title="Airtable WhatsApp Automation Guard",
+            icon="\U0001F4AC",
+            tagline=(
+                "Idempotent Make webhook simulator, Twilio payload router, "
+                "and error handling guard."
+            ),
+            audience="Automation and operations",
+            render=airtable_whatsapp_automation_guard,
         ),
     ]

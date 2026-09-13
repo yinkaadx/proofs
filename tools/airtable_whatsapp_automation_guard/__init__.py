@@ -1,0 +1,1 @@
+"""Airtable WhatsApp Automation Guard."""
