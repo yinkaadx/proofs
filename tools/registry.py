@@ -53,6 +53,7 @@ def all_tools() -> list[Tool]:
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.aerial_insights_qa_console.page import render as aerial_insights_qa_console
     from tools.askew_suit_engine.page import render as askew_suit_engine
+    from tools.hubspot_b2b_network_architect.page import render as hubspot_b2b_network_architect
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -244,6 +245,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Bespoke tailoring",
             render=askew_suit_engine,
+        ),
+        Tool(
+            key="hubspot-b2b-network-architect",
+            title="HubSpot B2B Network Architect",
+            icon="\U0001F578",
+            tagline=(
+                "Gridwise entity relationship model, network categorization "
+                "logic, and LinkedIn deduplication ledger."
+            ),
+            audience="RevOps and CRM architecture",
+            render=hubspot_b2b_network_architect,
         ),
     ] + [
         Tool(
