@@ -91,3 +91,59 @@ def choose(page, combobox_name: str, option_fragment: str,
     page.get_by_role("combobox", name=combobox_name, exact=True).click()
     page.get_by_role("option", name=option_fragment, exact=False).click()
     settle(page, timeout)
+
+
+SIDEBAR = 'section[data-testid="stSidebar"]'
+# The element that actually scrolls. The outer section always reports
+# scrollHeight == clientHeight, so measuring against it says everything is
+# visible even when six hundred pixels of content sit below the fold.
+SIDEBAR_SCROLLER = 'div[data-testid="stSidebarContent"]'
+
+# Find the smallest element in the sidebar whose own text contains a phrase, and
+# report where it sits relative to what a person can actually see. Ordering is
+# not visibility: an element can be in the right order and still be four hundred
+# pixels below the fold, which is how a sidebar shipped with its help invisible.
+VISIBILITY = """(phrase) => {
+  const sidebar = document.querySelector('div[data-testid="stSidebarContent"]')
+      || document.querySelector('section[data-testid="stSidebar"]');
+  if (!sidebar) return null;
+  const holders = [...sidebar.querySelectorAll('*')]
+      .filter(el => (el.innerText || '').includes(phrase));
+  if (!holders.length) return {found: false};
+  // The last match is the innermost element containing the phrase.
+  const el = holders[holders.length - 1];
+  const box = el.getBoundingClientRect();
+  const frame = sidebar.getBoundingClientRect();
+  return {
+    found: true,
+    top: Math.round(box.top - frame.top),
+    bottom: Math.round(box.bottom - frame.top),
+    visibleHeight: Math.round(sidebar.clientHeight),
+    scrollHeight: Math.round(sidebar.scrollHeight),
+    scrollTop: Math.round(sidebar.scrollTop),
+  };
+}"""
+
+
+def sidebar_position(page, phrase: str) -> dict:
+    """Where a phrase sits in the sidebar, in pixels, right now.
+
+    Returns found/top/bottom/visibleHeight/scrollHeight/scrollTop. `top` is
+    measured from the top of the sidebar's visible frame, so a negative value
+    means the text is scrolled off above and a value beyond visibleHeight means
+    it is below the fold.
+    """
+    return page.evaluate(VISIBILITY, phrase) or {"found": False}
+
+
+def visible_without_scrolling(page, phrase: str) -> bool:
+    """Whether a person sees this phrase without touching the scrollbar.
+
+    This is the assertion that was missing. A test that only proves the help
+    comes before the name plate passes happily while the help sits below the
+    fold, which is exactly what shipped.
+    """
+    where = sidebar_position(page, phrase)
+    if not where.get("found"):
+        return False
+    return 0 <= where["top"] < where["visibleHeight"]

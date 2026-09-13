@@ -29,10 +29,19 @@ from tools.registry import all_tools  # noqa: E402
 
 BASE = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8600"
 
+# A laptop, not a tall desktop. The sidebar failure this suite now guards
+# against only appears once the window is a realistic height.
+VIEWPORT_HEIGHT = 720
+# The help must start within this many pixels of the top of the sidebar. It is
+# a budget, not a preference: at 563px the old layout was still technically on
+# screen at this height, and two more tools would have ended that.
+HELP_MUST_START_ABOVE = 200
+
 try:
     from playwright.sync_api import sync_playwright
 
-    from tests.browser_util import hub_is_up, launch, open_tool, settle
+    from tests.browser_util import (hub_is_up, launch, open_tool,
+                                    settle, sidebar_position)
 except ImportError:
     print("URL RESULT: SKIP (playwright not installed)")
     sys.exit(0)
@@ -93,7 +102,7 @@ print(f"== Every registered tool resolves at its own URL ({len(TOOLS)} tools) ==
 
 with sync_playwright() as p:
     try:
-        browser, page = launch(p, viewport={"width": 1440, "height": 1000})
+        browser, page = launch(p, viewport={"width": 1440, "height": VIEWPORT_HEIGHT})
     except Exception as exc:  # noqa: BLE001
         print(f"URL RESULT: SKIP (browser unavailable: {exc})")
         sys.exit(0)
@@ -129,15 +138,26 @@ with sync_playwright() as p:
         expect("Traceback" not in content and "StreamlitAPIException" not in content,
                f"/{tool.key} renders without an exception on screen")
 
-        # The sidebar reads tool list, then this tool's own instructions, then
-        # the hub name plate. The help is what a person reaches for while using
-        # a tool, so it sits with the tools rather than below the branding.
-        sidebar = page.locator('section[data-testid="stSidebar"]').inner_text()
-        help_at = sidebar.find("How to use")
-        plate_at = sidebar.find(f"build {expected_build}")
-        expect(0 <= help_at < plate_at,
-               f"/{tool.key} puts its How to use steps above the hub name "
-               f"plate (help at {help_at}, name plate at {plate_at})")
+        # The tool's own instructions have to be VISIBLE, not merely ordered
+        # ahead of something else. The previous version of this check compared
+        # string offsets and passed happily while the help sat hundreds of
+        # pixels below the fold behind a list of sixteen tools. Order is not
+        # visibility, and only pixels can tell the difference.
+        where = sidebar_position(page, "How to use")
+        expect(where.get("found") is True,
+               f"/{tool.key} has How to use steps in the sidebar")
+        if where.get("found"):
+            expect(0 <= where["top"] < where["visibleHeight"],
+                   f"/{tool.key} shows its How to use steps without scrolling "
+                   f"(top {where['top']}px of {where['visibleHeight']}px "
+                   f"visible)")
+            # Near the top, not merely on screen. A margin this tight cannot be
+            # eaten by the next tool added to the registry, which is precisely
+            # how the old layout decayed one tool at a time.
+            expect(where["top"] < HELP_MUST_START_ABOVE,
+                   f"/{tool.key} puts its How to use steps in the first "
+                   f"{HELP_MUST_START_ABOVE}px of the sidebar (starts at "
+                   f"{where['top']}px), so the tool list cannot push them down")
 
     # A path that genuinely does not exist must still be reported as missing,
     # otherwise the two checks above would pass for any URL at all.
