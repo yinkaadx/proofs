@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.reventure_conversion_engine.page import render as reventure_conversion_engine
     from tools.ten_dlc_compliance_validator.page import render as ten_dlc_compliance_validator
     from tools.web3_smart_escrow_console.page import render as web3_smart_escrow_console
     from tools.retreat_funnel_redundancy_guard.page import render as retreat_funnel_redundancy_guard
@@ -145,5 +146,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="SMS compliance",
             render=ten_dlc_compliance_validator,
+        ),
+        Tool(
+            key="reventure-conversion-engine",
+            title="Mobile Conversion & Release Engine",
+            icon="\U0001F4F1",
+            tagline=(
+                "Feature flag A/B test controller, App Store rating logic, and "
+                "Stripe subscription webhook pipeline."
+            ),
+            audience="Mobile product engineering",
+            render=reventure_conversion_engine,
         ),
     ]

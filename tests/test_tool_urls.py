@@ -19,6 +19,7 @@ Skips cleanly (exit 0) when the browser or the hub is unavailable.
 
 from __future__ import annotations
 
+import html
 import sys
 from pathlib import Path
 
@@ -48,6 +49,12 @@ checks = 0
 NOT_FOUND = "does not seem to exist"
 
 
+def shown(title: str, body: str) -> bool:
+    """A title reaches the rendered HTML either literally or escaped, because
+    `esc()` turns an ampersand into &amp;. Both count as being on the page."""
+    return title in body or html.escape(title) in body
+
+
 def expect(condition: bool, label: str) -> None:
     global checks
     checks += 1
@@ -74,7 +81,8 @@ with sync_playwright() as p:
     settle(page)
     home = page.content()
     for tool in TOOLS:
-        expect(tool.title in home, f"the landing page lists {tool.title}")
+        expect(shown(tool.title, home),
+               f"the landing page lists {tool.title}")
 
     # Belt and braces against a stale server. If the hub is serving an older
     # commit than the checkout, every check below would be testing code that is
@@ -93,7 +101,7 @@ with sync_playwright() as p:
 
         expect(NOT_FOUND not in content,
                f"/{tool.key} is a real page, not the not found fallback")
-        expect(tool.title in content,
+        expect(shown(tool.title, content),
                f"/{tool.key} renders its own title, {tool.title!r}")
         expect("Traceback" not in content and "StreamlitAPIException" not in content,
                f"/{tool.key} renders without an exception on screen")

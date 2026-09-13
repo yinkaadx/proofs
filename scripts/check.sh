@@ -48,6 +48,8 @@ PYTEST_SUITES=(
   tests/test_web3_smart_escrow_console_page.py
   tests/test_ten_dlc_compliance_validator.py
   tests/test_ten_dlc_compliance_validator_page.py
+  tests/test_reventure_conversion_engine.py
+  tests/test_reventure_conversion_engine_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"
