@@ -19,7 +19,6 @@ Skips cleanly (exit 0) when the browser or the hub is unavailable.
 
 from __future__ import annotations
 
-import html
 import sys
 from pathlib import Path
 
@@ -49,10 +48,34 @@ checks = 0
 NOT_FOUND = "does not seem to exist"
 
 
-def shown(title: str, body: str) -> bool:
-    """A title reaches the rendered HTML either literally or escaped, because
-    `esc()` turns an ampersand into &amp;. Both count as being on the page."""
-    return title in body or html.escape(title) in body
+def visible_text(page, timeout: int = 15000) -> str:
+    """The text a person would actually read.
+
+    Not `page.content()`. That is the serialised DOM, where an ampersand comes
+    back as &amp; and a title has to be matched twice over. Visible text also
+    forces the question this test is really asking: can somebody see the name
+    the tool is registered under.
+    """
+    page.wait_for_function(
+        "() => (document.body.innerText || '').trim().length > 200",
+        timeout=timeout)
+    return page.inner_text("body")
+
+
+def wait_for_title(page, title: str, timeout: int = 15000) -> bool:
+    """Wait for the title to appear rather than reading once and hoping.
+
+    `settle()` says the script finished, which is not the same as the page
+    having painted. Reading immediately after it passes on a fast render and
+    fails on a slow one, which is a flaky test pretending to be a real one.
+    """
+    try:
+        page.wait_for_function(
+            "t => (document.body.innerText || '').includes(t)", arg=title,
+            timeout=timeout)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def expect(condition: bool, label: str) -> None:
@@ -79,9 +102,9 @@ with sync_playwright() as p:
     # way in from the front door.
     page.goto(BASE, wait_until="domcontentloaded", timeout=60000)
     settle(page)
-    home = page.content()
+    home = visible_text(page)
     for tool in TOOLS:
-        expect(shown(tool.title, home),
+        expect(wait_for_title(page, tool.title),
                f"the landing page lists {tool.title}")
 
     # Belt and braces against a stale server. If the hub is serving an older
@@ -101,7 +124,7 @@ with sync_playwright() as p:
 
         expect(NOT_FOUND not in content,
                f"/{tool.key} is a real page, not the not found fallback")
-        expect(shown(tool.title, content),
+        expect(wait_for_title(page, tool.title),
                f"/{tool.key} renders its own title, {tool.title!r}")
         expect("Traceback" not in content and "StreamlitAPIException" not in content,
                f"/{tool.key} renders without an exception on screen")

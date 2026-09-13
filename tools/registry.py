@@ -27,6 +27,7 @@ def all_tools() -> list[Tool]:
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.wastetab_dispatch_engine.page import render as wastetab_dispatch_engine
     from tools.reventure_conversion_engine.page import render as reventure_conversion_engine
     from tools.ten_dlc_compliance_validator.page import render as ten_dlc_compliance_validator
     from tools.web3_smart_escrow_console.page import render as web3_smart_escrow_console
@@ -181,5 +182,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Microsoft 365 consulting",
             render=m365_intranet_architecture_console,
+        ),
+        Tool(
+            key="wastetab-dispatch-engine",
+            title="WasteTab Logistics & Financial Engine",
+            icon="\U0001F69B",
+            tagline=(
+                "Regional dispatch routing, GoDaddy gross up fee calculator, "
+                "and emergency safety valve simulator."
+            ),
+            audience="Waste logistics operations",
+            render=wastetab_dispatch_engine,
         ),
     ]
