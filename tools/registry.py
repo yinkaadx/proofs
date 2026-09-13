@@ -25,6 +25,7 @@ def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
     from tools.aerial_insights_qa_console.page import render as aerial_insights_qa_console
+    from tools.askew_suit_engine.page import render as askew_suit_engine
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -205,5 +206,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Platform engineering",
             render=aerial_insights_qa_console,
+        ),
+        Tool(
+            key="askew-suit-engine",
+            title="ASKEW Bespoke Pricing Engine",
+            icon="\U0001F9F5",
+            tagline=(
+                "Visual base plus upgrade configurator, fifty percent split "
+                "deposit logic, and customer measurement database simulator."
+            ),
+            audience="Bespoke tailoring",
+            render=askew_suit_engine,
         ),
     ]

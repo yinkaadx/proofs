@@ -58,6 +58,8 @@ PYTEST_SUITES=(
   tests/test_wastetab_dispatch_engine_page.py
   tests/test_aerial_insights_qa_console.py
   tests/test_aerial_insights_qa_console_page.py
+  tests/test_askew_suit_engine.py
+  tests/test_askew_suit_engine_page.py
 )
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"

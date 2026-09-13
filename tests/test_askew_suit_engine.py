@@ -437,3 +437,37 @@ def test_no_dash_characters_in_any_user_facing_prose():
     prose = "\n".join(parts)
     assert "—" not in prose
     assert "–" not in prose
+
+
+# ---------------------------------------------------------------------------
+# One engine, two front doors
+# ---------------------------------------------------------------------------
+
+def test_the_standalone_app_and_the_hub_tool_share_one_engine():
+    """Two implementations of the same pricing is how a deposit comes to
+    disagree with an invoice. The root module re-exports the package rather
+    than holding a second copy, so there is nothing to drift."""
+    import askew_suit_engine as standalone
+    from tools.askew_suit_engine import core
+
+    assert standalone.price is core.price
+    assert standalone.Commission is core.Commission
+    assert standalone.deposit_for is core.deposit_for
+    assert standalone.save_profile is core.save_profile
+
+
+def test_the_engine_module_carries_no_streamlit_import():
+    """The hub renders it, pytest imports it, and neither needs a runtime."""
+    from pathlib import Path
+
+    source = Path(__file__).resolve().parents[1] / "tools" / \
+        "askew_suit_engine" / "core.py"
+    assert "import streamlit" not in source.read_text()
+
+
+def test_every_public_name_the_standalone_app_needs_is_exported():
+    import askew_suit_engine as standalone
+    from tools.askew_suit_engine import core
+
+    for name in core.__all__:
+        assert hasattr(standalone, name), name
