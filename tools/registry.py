@@ -24,6 +24,7 @@ class Tool:
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
+    from tools.pipedrive_integration_engine.page import render as pipedrive_integration_engine
     from tools.wp_form_debugger.page import render as wp_form_debugger
 
     return [
@@ -49,5 +50,16 @@ def all_tools() -> list[Tool]:
             ),
             audience="Revenue operations",
             render=netsuite_hubspot_sync,
+        ),
+        Tool(
+            key="pipedrive-integration-engine",
+            title="Pipedrive API & Integration Console",
+            icon="📲",
+            tagline=(
+                "Direct webhook dispatch without Zapier, Sinch AI SMS "
+                "threading, and Power BI incremental sync ledger."
+            ),
+            audience="Sales operations",
+            render=pipedrive_integration_engine,
         ),
     ]

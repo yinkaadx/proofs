@@ -18,6 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
+from shared.theme import esc  # noqa: E402
 from tools.registry import Tool, all_tools  # noqa: E402
 
 failures: list[str] = []
@@ -86,7 +87,10 @@ expect(not at.exception, f"hub runs clean (got {[str(e.value) for e in at.except
 body = text_of(at)
 expect("Toolbench" in body, "hub name renders")
 for t in tools:
-    expect(t.title in body, f"landing page lists {t.title}")
+    # A title carrying an HTML special character reaches the card escaped,
+    # which is the correct rendering, so either form counts as present.
+    expect(t.title in body or esc(t.title) in body,
+           f"landing page lists {t.title}")
     expect(t.tagline[:40] in body, f"landing page shows the {t.key} tagline")
 expect(f"{len(tools)} tool" in body, "landing page states how many tools are available")
 
