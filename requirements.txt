@@ -1,2 +1,7 @@
 streamlit>=1.40
 beautifulsoup4>=4.12
+# tests/test_promote_workflow.py parses the promotion workflow rather than
+# trusting a reading of it, so the suite cannot run without a YAML parser. It
+# belongs here and not only in the workflow that happens to install it, because
+# every suite in this repository has to run standalone from a checkout.
+pyyaml>=6.0

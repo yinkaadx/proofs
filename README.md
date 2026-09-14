@@ -33,6 +33,7 @@ by pushing code.
 | [WP Form Debugger](tools/wp_form_debugger/README.md) | `/wp-form-debugger` | Finds why a WordPress form stopped submitting or delivering and returns the exact PHP, JavaScript and wp-config.php fix |
 | [NetSuite HubSpot Idempotent Sync Console](tools/netsuite_hubspot_sync/README.md) | `/netsuite-hubspot-sync` | Deal sync simulator, account matching, SHA256 idempotency ledger and SharePoint audit feed |
 | [Pipedrive API & Integration Console](tools/pipedrive_integration_engine/README.md) | `/pipedrive-integration-engine` | Direct webhook dispatch without Zapier, Sinch AI SMS threading with sales rep handover, opt out synchronizer and a Power BI incremental sync ledger |
+| [EHR Cloud Security & WIF Architecture Console](tools/cloud_security_wif_console/README.md) | `/cloud-security-wif-console` | Azure to GCP Workload Identity Federation simulator, GCS Credential Access Boundary evaluator, Key Vault versus Managed Identity matrix and the IIS static key failure mode inspector |
 
 ## Adding a tool
 
@@ -76,15 +77,20 @@ python3 -m pytest tests/test_pipedrive_integration_engine.py \
                  tests/test_pipedrive_integration_engine_page.py -q
 
 python3 tests/test_keep_streamlit_awake.py    # the keep awake prober
+
+python3 -m pytest tests/test_cloud_security_wif_console.py \
+                 tests/test_cloud_security_wif_console_page.py -q
+python3 tests/test_promote_workflow.py        # the promotion workflow guarantees
 ```
 
 Every suite declares its pass and fail markers before running and parses results
 programmatically, so nothing is judged by eye. Clean runs print
-`HUB RESULT: PASS 34/34`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
+`HUB RESULT: PASS 56/56`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
 `PHP RESULT: PASS 30/30`, `THEME RESULT: PASS 14/14`,
 `SYNC RESULT: PASS 117/117`, `SYNC UI RESULT: PASS 28/28`,
-`PIPEDRIVE RESULT: PASS 47/47` and `PIPEDRIVE UI RESULT: PASS 24/24`, and each
-exits 0.
+`PIPEDRIVE RESULT: PASS 47/47`, `PIPEDRIVE UI RESULT: PASS 24/24`,
+`KEEPALIVE UNIT RESULT: PASS 22/22`, `WIF RESULT: PASS 57/57`,
+`WIF UI RESULT: PASS 30/30` and `PROMOTE RESULT: PASS 22/22`, and each exits 0.
 Any failure prints lines beginning `FAIL` and exits 1.
 
 `tests/test_php_syntax.py` skips cleanly when no `php` binary is present, and
@@ -95,6 +101,39 @@ available. To run it, start the hub first and pass its URL:
 streamlit run streamlit_app.py --server.port 8503 --server.headless true &
 python3 tests/test_theme.py http://127.0.0.1:8503
 ```
+
+## How a tool reaches the live app
+
+Community Cloud builds one branch and one branch only. Until work reaches that
+branch it is invisible to every visitor, which is the gap that used to be closed
+by hand. `.github/workflows/promote-to-deploy.yml` closes it automatically, and
+only ever behind a green run.
+
+On a push to any `claude/**` branch it checks whether that branch is already
+contained in the deploy branch and stops if it is. Otherwise it runs every suite
+in `tests/` the way this repository runs them, as `python3 tests/<file>.py`,
+because most of them are script style and call `sys.exit` at module level, which
+makes a bare `pytest tests/` error during collection and report a red run that
+says nothing about the code. `tests/test_theme.py` is skipped: it needs a live
+hub and a real browser.
+
+Only if every suite passed does it merge the session branch into the deploy
+branch with `--no-ff` and push. It never rebases, never force pushes and never
+amends, because the live app is built from that branch and a rewritten history
+under a running deploy makes a rollback impossible to reason about. A conflict
+aborts the merge, names the conflicting files and pushes nothing.
+
+It then runs the keep awake prober in the same job. A push made with
+`GITHUB_TOKEN` does not trigger other workflows, so `keep-awake.yml` will not
+fire for that push, and without this step a freshly merged tool would sit
+undeployed until something else happened to wake the app.
+
+`tests/test_promote_workflow.py` parses the workflow and holds each of those
+guarantees in place, including the two that are easy to get wrong: the merge
+step must name the test gate's own green output as a precondition rather than
+relying on an implicit one, and every git command in the merge step must be
+checked, because that script cannot use `set -e` and an unchecked failed push
+would otherwise report a success that never happened.
 
 ## Staying awake, and staying current
 

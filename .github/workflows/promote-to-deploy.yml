@@ -1,0 +1,237 @@
+# Promote a session branch onto the branch Streamlit Community Cloud serves.
+#
+# Community Cloud deploys one branch and one branch only. Work done on a
+# session branch is invisible to every real visitor until it reaches that
+# branch, so the gap between "committed" and "deployed" is where a finished
+# tool quietly sits unseen. This closes the gap automatically, but only ever
+# behind a green test run: an automatic merge that can ship a broken hub is
+# worse than no automation at all, because it removes the person who would
+# have noticed.
+name: Promote session branch to the deploy branch
+
+on:
+  # Session branches only. The deploy branch and main are excluded again at
+  # job level, because a branch filter alone would still let a push to the
+  # deploy branch start a run that tried to merge that branch into itself.
+  push:
+    branches:
+      - "claude/**"
+  workflow_dispatch:
+
+# Two session branches landing at once would each check out the deploy branch,
+# merge, and race to push. The loser's push either fails or lands on a ref that
+# moved under it, which is how one of the two promotions quietly disappears.
+# Serializing removes that race. It does not make the merged tree a tested
+# tree: the gate below runs on the session branch, before the merge, so what
+# is proved green is the branch and not the combination. The narrower claim is
+# the true one, and the prober at the end is what looks at the merged result.
+concurrency:
+  group: promote-to-deploy
+  cancel-in-progress: false
+
+# Writing to the repository is the whole job. Nothing else is needed, so
+# nothing else is granted.
+permissions:
+  contents: write
+
+env:
+  # The branch Streamlit Community Cloud builds the live app from, recorded in
+  # README.md and used by .github/workflows/keep-awake.yml as well.
+  DEPLOY_BRANCH: claude/kind-feynman-489x72
+  # The suite that needs a live hub and a real browser, so it cannot pass on a
+  # runner that has neither. It is covered for real by the keep awake job.
+  SKIP_SUITE: tests/test_theme.py
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    # The deploy branch matches "claude/**" too, so without this guard a push
+    # to it would start a run that merged the deploy branch into itself. main
+    # is named as well: it is not a session branch and is never promoted.
+    # The literal branch name is repeated here on purpose, because the env
+    # context is not available in a job level condition.
+    if: >-
+      github.ref_name != 'claude/kind-feynman-489x72' &&
+      github.ref_name != 'main'
+    # A cold Playwright install plus a full suite run is minutes, not hours.
+    # An explicit ceiling stops a hung browser holding the concurrency group.
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out the full history
+        uses: actions/checkout@v4
+        with:
+          # Shallow history cannot answer "is this branch already contained in
+          # that one", which is the question the next step asks.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install what the suites import
+        run: |
+          python3 -m pip install --upgrade pip
+          python3 -m pip install -r requirements.txt pyyaml pytest
+
+      - name: Decide whether there is anything to promote
+        id: plan
+        run: |
+          set -euo pipefail
+          SESSION_BRANCH="${GITHUB_REF_NAME}"
+          SESSION_SHA="${GITHUB_SHA}"
+          echo "session_branch=${SESSION_BRANCH}" >> "$GITHUB_OUTPUT"
+          echo "session_sha=${SESSION_SHA}" >> "$GITHUB_OUTPUT"
+
+          if ! git fetch origin "+refs/heads/${DEPLOY_BRANCH}:refs/remotes/origin/${DEPLOY_BRANCH}"; then
+            echo "FAIL the deploy branch ${DEPLOY_BRANCH} does not exist on origin."
+            exit 1
+          fi
+
+          if git merge-base --is-ancestor "${SESSION_SHA}" "origin/${DEPLOY_BRANCH}"; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "Nothing to do: ${SESSION_BRANCH} at ${SESSION_SHA} is already"
+            echo "contained in ${DEPLOY_BRANCH}. Exiting successfully without"
+            echo "running the suites or touching the deploy branch."
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "${SESSION_BRANCH} at ${SESSION_SHA} is not yet in ${DEPLOY_BRANCH}."
+          fi
+
+      - name: Run every suite the repository's own way
+        id: gate
+        if: steps.plan.outputs.needed == 'true'
+        run: |
+          set -uo pipefail
+          # Most suites in tests/ are script style and call sys.exit at module
+          # level, so "pytest tests/" errors during collection and reports a
+          # red run that says nothing about the code. Every suite, script
+          # style and pytest style alike, carries a __main__ runner, so
+          # running the file is the one command that works for all of them.
+          passed=()
+          failed=()
+          skipped=()
+          for suite in tests/test_*.py; do
+            if [ "${suite}" = "${SKIP_SUITE}" ]; then
+              skipped+=("${suite}")
+              continue
+            fi
+            echo "::group::${suite}"
+            if python3 "${suite}"; then
+              passed+=("${suite}")
+            else
+              failed+=("${suite}")
+            fi
+            echo "::endgroup::"
+          done
+
+          echo
+          echo "SUITE SUMMARY"
+          for suite in "${passed[@]:-}"; do
+            [ -n "${suite}" ] && echo "  ok      ${suite}"
+          done
+          for suite in "${skipped[@]:-}"; do
+            [ -n "${suite}" ] && echo "  skipped ${suite} (needs a live hub and a browser)"
+          done
+          for suite in "${failed[@]:-}"; do
+            [ -n "${suite}" ] && echo "  FAIL    ${suite}"
+          done
+
+          if [ "${#failed[@]}" -gt 0 ]; then
+            echo
+            echo "FAIL ${#failed[@]} suite(s) failed, so nothing is merged into ${DEPLOY_BRANCH}."
+            exit 1
+          fi
+          echo
+          echo "All ${#passed[@]} suites passed. Safe to promote."
+          # The merge step requires this output to be exactly "true". An
+          # implicit success() on a step condition would probably be enough,
+          # but "probably" is not the right standard for the one gate that
+          # stops a red branch reaching the live app, so the permission to
+          # merge is written down explicitly and has to be read back.
+          echo "green=true" >> "$GITHUB_OUTPUT"
+
+      - name: Merge the session branch into the deploy branch and push
+        id: merge
+        # Both conditions are named. "needed" alone would let a red gate
+        # through if the implicit success() ever stopped applying, and this is
+        # the step that ships to the live app, so it states its own precondition.
+        if: steps.plan.outputs.needed == 'true' && steps.gate.outputs.green == 'true'
+        # Passed as environment variables rather than interpolated into the
+        # script body. A git branch name may legally contain ; & | $ and
+        # backticks, and a ${{ }} substitution would paste those straight into
+        # the shell before it runs. As an env var the name is data, not code.
+        env:
+          SESSION_BRANCH: ${{ steps.plan.outputs.session_branch }}
+          SESSION_SHA: ${{ steps.plan.outputs.session_sha }}
+        run: |
+          set -uo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # Only ever add to the deploy branch's history. The live app is
+          # built from it, and rewriting history under a running deploy is how
+          # a rollback becomes impossible to reason about later.
+          #
+          # Every git call below is checked. This script deliberately does not
+          # use set -e, so that the conflict path can clean up before exiting,
+          # and an unchecked command would therefore fail silently and let the
+          # final echo report a success that never happened.
+          if ! git checkout -B "${DEPLOY_BRANCH}" "origin/${DEPLOY_BRANCH}"; then
+            echo "FAIL could not check out ${DEPLOY_BRANCH} from origin."
+            echo "Nothing was merged and nothing was pushed."
+            exit 1
+          fi
+
+          if ! git merge --no-ff -m "Promote ${SESSION_BRANCH} to ${DEPLOY_BRANCH} after a green suite run" "${SESSION_SHA}"; then
+            conflicts="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+            git merge --abort || true
+            echo
+            echo "FAIL the merge conflicts in: ${conflicts}"
+            echo "The merge was aborted and nothing was pushed. Resolve those"
+            echo "files on ${SESSION_BRANCH} and push again."
+            exit 1
+          fi
+
+          if ! git push origin "${DEPLOY_BRANCH}"; then
+            echo
+            echo "FAIL the push to ${DEPLOY_BRANCH} was rejected. The merge"
+            echo "exists only in this runner and the live app is unchanged."
+            echo "A branch protection rule, or a push that landed on"
+            echo "${DEPLOY_BRANCH} while this job was running, are the usual"
+            echo "causes. Nothing has been lost: rerun this job."
+            exit 1
+          fi
+          echo "Merged ${SESSION_BRANCH} into ${DEPLOY_BRANCH} and pushed."
+
+      - name: Wake the live app so the merge actually deploys
+        # A push made with GITHUB_TOKEN does not trigger other workflows, so
+        # keep-awake.yml will not fire for the push above. Without this the
+        # newly merged tool would sit undeployed until something else happened
+        # to wake the app, which could be hours.
+        #
+        # The merge has already succeeded by this point and is already public.
+        # An unreachable app is worth reporting, but it is not a reason to
+        # paint the promotion red.
+        if: steps.plan.outputs.needed == 'true' && steps.merge.outcome == 'success'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          python3 -m pip install playwright
+          python3 -m playwright install --with-deps chromium
+          # The working tree is the deploy branch after the merge, so the
+          # registry checked against the live app is the one just shipped.
+          if python3 scripts/keep_streamlit_awake.py --verify-tools; then
+            echo "The live app is awake and serving every registered tool."
+          else
+            echo "The prober could not confirm the live app."
+            echo "The merge to ${DEPLOY_BRANCH} succeeded and is already pushed."
+            echo "Community Cloud will pick it up on the next visit or wake."
+          fi
+
+      - name: Say so when there was nothing to promote
+        if: steps.plan.outputs.needed == 'false'
+        run: |
+          echo "${GITHUB_REF_NAME} is already contained in ${DEPLOY_BRANCH}."
+          echo "No suites were run, no merge was made, and nothing was pushed."
