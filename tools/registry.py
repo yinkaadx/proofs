@@ -65,7 +65,9 @@ def all_tools() -> list[Tool]:
     from tools.sharepoint_zero_trust_simulator.page import render as sharepoint_zero_trust_simulator
     from tools.tv_mt5_bridge_diagnostic.page import render as tv_mt5_bridge_diagnostic
     from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
+    from tools.cloud_security_wif_console.page import render as cloud_security_wif_console
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
+    from tools.pipedrive_integration_engine.page import render as pipedrive_integration_engine
     from tools.wp_form_debugger.page import render as wp_form_debugger
 
     return [
@@ -91,6 +93,29 @@ def all_tools() -> list[Tool]:
             ),
             audience="Revenue operations",
             render=netsuite_hubspot_sync,
+        ),
+        Tool(
+            key="pipedrive-integration-engine",
+            title="Pipedrive API & Integration Console",
+            icon="\U0001F514",
+            tagline=(
+                "Direct webhook dispatch without Zapier, Sinch AI SMS "
+                "threading, and Power BI incremental sync ledger."
+            ),
+            audience="Sales operations",
+            render=pipedrive_integration_engine,
+        ),
+        Tool(
+            key="cloud-security-wif-console",
+            title="EHR Cloud Security & WIF Architecture Console",
+            icon="\U0001F511",
+            tagline=(
+                "Azure to GCP Workload Identity Federation simulator, GCS "
+                "Credential Access Boundary evaluator, and Key Vault policy "
+                "matrix."
+            ),
+            audience="Security architecture",
+            render=cloud_security_wif_console,
         ),
         Tool(
             key="multi-channel-inventory-sync",

@@ -1,0 +1,85 @@
+# Keeps every Streamlit Community Cloud app listed in
+# .github/streamlit-apps.txt awake, and proves the live app is current.
+#
+# Why a browser and not a ping: the app URL answers 200 from a static shell
+# whether the app is running or asleep, so an HTTP uptime check reports green
+# on a sleeping app. Only a real browser session opens the websocket that
+# Community Cloud counts as a visit, so this drives headless Chromium.
+name: Keep Streamlit apps awake
+
+on:
+  # Community Cloud sleeps an app after a spell with no visitor, and that
+  # window has been shortened over time. Every three hours leaves a wide
+  # margin even if a scheduled run is delayed.
+  schedule:
+    - cron: "0 */3 * * *"
+  # Any push wakes the app, which is what makes a newly merged tool show up
+  # without anyone rebooting it by hand.
+  push:
+    branches: ["**"]
+  workflow_dispatch:
+
+concurrency:
+  group: keep-streamlit-awake
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The branch Streamlit Community Cloud serves from, recorded in README.md.
+  # Only used to decide which tool list the live app is measured against.
+  DEPLOY_BRANCH: claude/kind-feynman-489x72
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Take the tool list from the branch that is actually deployed
+        id: registry
+        run: |
+          # The live app is built from DEPLOY_BRANCH, so that branch's registry
+          # is the correct list to measure it against. A scheduled run happens
+          # on the default branch, which can be ahead or behind, and comparing
+          # against the wrong list would either miss a stale deploy or invent
+          # a failure that is not real.
+          if git fetch --depth=1 origin "$DEPLOY_BRANCH" 2>/dev/null; then
+            git show FETCH_HEAD:tools/registry.py > deployed-registry.py
+            echo "path=deployed-registry.py" >> "$GITHUB_OUTPUT"
+            echo "Measuring the live app against $DEPLOY_BRANCH."
+          else
+            echo "path=tools/registry.py" >> "$GITHUB_OUTPUT"
+            echo "Could not read $DEPLOY_BRANCH, falling back to this checkout."
+          fi
+
+      - name: Wake every app and prove it rendered
+        run: |
+          python3 scripts/keep_streamlit_awake.py \
+            --apps .github/streamlit-apps.txt \
+            --registry "${{ steps.registry.outputs.path }}" \
+            --verify-tools \
+            --shots keepalive-evidence
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepalive-evidence-${{ github.run_number }}
+          path: |
+            keepalive-evidence/
+            keepalive-summary.json
+          retention-days: 14
+          if-no-files-found: ignore
