@@ -12,7 +12,12 @@ on:
   # window has been shortened over time. Every three hours leaves a wide
   # margin even if a scheduled run is delayed.
   schedule:
-    - cron: "0 */3 * * *"
+    # Minute 23, not minute 0. GitHub's own documentation says the schedule
+    # event is delayed when Actions is under high load, that the start of every
+    # hour is exactly when that load peaks, and that queued jobs may simply be
+    # dropped then. A wake that is dropped is an app that goes to sleep, so the
+    # run is deliberately placed away from the busiest minute.
+    - cron: "23 */3 * * *"
   # Any push wakes the app, which is what makes a newly merged tool show up
   # without anyone rebooting it by hand.
   push:

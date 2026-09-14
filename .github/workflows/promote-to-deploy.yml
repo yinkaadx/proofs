@@ -38,9 +38,11 @@ env:
   # The branch Streamlit Community Cloud builds the live app from, recorded in
   # README.md and used by .github/workflows/keep-awake.yml as well.
   DEPLOY_BRANCH: claude/kind-feynman-489x72
-  # The suite that needs a live hub and a real browser, so it cannot pass on a
-  # runner that has neither. It is covered for real by the keep awake job.
-  SKIP_SUITE: tests/test_theme.py
+
+# The suites that need a live hub and a real browser cannot run on a runner
+# that has neither. scripts/run_suites.py knows which those are and reports
+# them as skipped rather than as passed, and the keep awake job covers the live
+# app for real, so no suite name needs listing here.
 
 jobs:
   promote:
@@ -103,47 +105,27 @@ jobs:
         if: steps.plan.outputs.needed == 'true'
         run: |
           set -uo pipefail
-          # Most suites in tests/ are script style and call sys.exit at module
-          # level, so "pytest tests/" errors during collection and reports a
-          # red run that says nothing about the code. Every suite, script
-          # style and pytest style alike, carries a __main__ runner, so
-          # running the file is the one command that works for all of them.
-          passed=()
-          failed=()
-          skipped=()
-          for suite in tests/test_*.py; do
-            if [ "${suite}" = "${SKIP_SUITE}" ]; then
-              skipped+=("${suite}")
-              continue
-            fi
-            echo "::group::${suite}"
-            if python3 "${suite}"; then
-              passed+=("${suite}")
-            else
-              failed+=("${suite}")
-            fi
-            echo "::endgroup::"
-          done
-
-          echo
-          echo "SUITE SUMMARY"
-          for suite in "${passed[@]:-}"; do
-            [ -n "${suite}" ] && echo "  ok      ${suite}"
-          done
-          for suite in "${skipped[@]:-}"; do
-            [ -n "${suite}" ] && echo "  skipped ${suite} (needs a live hub and a browser)"
-          done
-          for suite in "${failed[@]:-}"; do
-            [ -n "${suite}" ] && echo "  FAIL    ${suite}"
-          done
-
-          if [ "${#failed[@]}" -gt 0 ]; then
+          # This step used to be a loop running `python3 tests/<file>.py` over
+          # every suite, on the belief that all of them carry a __main__
+          # runner. Most do not. A pytest style file run that way defines its
+          # test functions, calls none of them, prints nothing and exits 0, so
+          # the loop counted it as passed. Twenty eight of forty seven suites,
+          # covering fourteen of the nineteen tools, were being waved through
+          # without a single check executing, and this gate, the one thing
+          # standing between a broken hub and the live app, reported "All
+          # suites passed" while proving nothing about them.
+          #
+          # scripts/run_suites.py replaces that. It discovers the suites rather
+          # than reading a list, runs each one the way its own style actually
+          # executes, and fails any suite that cannot show that checks ran,
+          # because exit 0 is not evidence.
+          python3 scripts/run_suites.py --no-browser
+          status=$?
+          if [ "${status}" -ne 0 ]; then
             echo
-            echo "FAIL ${#failed[@]} suite(s) failed, so nothing is merged into ${DEPLOY_BRANCH}."
-            exit 1
+            echo "FAIL the suites did not pass, so nothing is merged into ${DEPLOY_BRANCH}."
+            exit "${status}"
           fi
-          echo
-          echo "All ${#passed[@]} suites passed. Safe to promote."
           # The merge step requires this output to be exactly "true". An
           # implicit success() on a step condition would probably be enough,
           # but "probably" is not the right standard for the one gate that
@@ -205,6 +187,34 @@ jobs:
           fi
           echo "Merged ${SESSION_BRANCH} into ${DEPLOY_BRANCH} and pushed."
 
+      - name: Fast forward main so the schedule keeps working
+        # GitHub runs a schedule: trigger only from the copy of a workflow file
+        # on the default branch. main is the default branch and did not carry
+        # keep-awake.yml, so the every three hours wake had produced exactly
+        # zero runs since it was written: the Actions API, filtered by
+        # event=schedule, returned nothing at all. The app stayed awake only as
+        # a side effect of somebody pushing.
+        #
+        # A one time merge would not have held, because nothing here ever
+        # advanced main. So main is brought along on every promotion instead.
+        # That also keeps the repository front page honest and means a session
+        # branch cut from main starts with the current registry rather than
+        # conflicting with it.
+        #
+        # Fast forward only. There is no --force anywhere: git rejects a push
+        # that is not a fast forward, and a rejection here must be read and
+        # reported rather than overridden, because main is the default branch
+        # and somebody may have put something on it deliberately.
+        if: steps.plan.outputs.needed == 'true' && steps.merge.outcome == 'success'
+        run: |
+          set -uo pipefail
+          if git push origin "HEAD:main"; then
+            echo "main now matches ${DEPLOY_BRANCH}, so the schedule runs the current workflow."
+            exit 0
+          fi
+          echo "::error::main could not be fast forwarded to ${DEPLOY_BRANCH}. It has diverged, so nothing was forced. Until main carries keep-awake.yml the three hourly wake does not run at all. Reconcile main by hand."
+          exit 1
+
       - name: Wake the live app and confirm the merge actually deployed
         # A push made with GITHUB_TOKEN does not trigger other workflows, so
         # keep-awake.yml will not fire for the push above. Without this the
@@ -245,3 +255,35 @@ jobs:
         run: |
           echo "${GITHUB_REF_NAME} is already contained in ${DEPLOY_BRANCH}."
           echo "No suites were run, no merge was made, and nothing was pushed."
+
+  # A push made directly to the deploy branch never reaches the job above: it
+  # is excluded there so a branch cannot be merged into itself. Without this
+  # job main would still drift every time work landed on the deploy branch
+  # without going through a session branch, which is how it fell 30 commits and
+  # 17 tools behind in the first place.
+  sync-main:
+    runs-on: ubuntu-latest
+    if: github.ref_name == 'claude/kind-feynman-489x72'
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fast forward main to the deploy branch
+        run: |
+          set -uo pipefail
+          git fetch origin main || true
+          if git rev-parse --verify origin/main >/dev/null 2>&1 \
+             && git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+            echo "main already contains ${GITHUB_SHA}. Nothing to do."
+            exit 0
+          fi
+          if git push origin "${GITHUB_SHA}:main"; then
+            echo "main fast forwarded to ${GITHUB_SHA}."
+            exit 0
+          fi
+          echo "::error::main could not be fast forwarded to ${GITHUB_SHA}. It has diverged from the deploy branch, so nothing was forced. The three hourly keep awake schedule runs the copy of the workflow on main, so while main is behind, that schedule is running stale instructions or none at all."
+          exit 1

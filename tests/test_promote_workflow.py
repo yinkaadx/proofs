@@ -31,9 +31,17 @@ WORKFLOW = ROOT / ".github" / "workflows" / "promote-to-deploy.yml"
 # it moves in both workflows and here together, and this test is what says so.
 DEPLOY_BRANCH = "claude/kind-feynman-489x72"
 
-# The suite that drives a real browser against the live hub. A runner has
-# neither, so including it would fail every promotion for a reason that has
-# nothing to do with the code being promoted.
+# The gate runs every suite through one runner rather than looping over the
+# files itself. That is not a tidiness preference: the loop it replaced ran
+# `python3 tests/<file>.py` on every suite, which executes nothing at all for a
+# pytest style file, and twenty eight of the forty seven suites here are that
+# style. The gate was reporting them as passed without running a check.
+RUNNER = "scripts/run_suites.py"
+
+# The suites that drive a real browser against a live hub. A runner has
+# neither, so including them would fail every promotion for a reason that has
+# nothing to do with the code being promoted. The runner owns this list now,
+# which is why the workflow names none of them.
 SKIPPED_SUITE = "tests/test_theme.py"
 
 
@@ -53,8 +61,14 @@ def triggers(data: dict):
 
 def job(data: dict) -> dict:
     jobs = data["jobs"]
-    assert len(jobs) == 1, f"expected exactly one job, found {sorted(jobs)}"
-    return next(iter(jobs.values()))
+    assert "promote" in jobs, f"no promote job, found {sorted(jobs)}"
+    return jobs["promote"]
+
+
+def sync_job(data: dict) -> dict:
+    jobs = data["jobs"]
+    assert "sync-main" in jobs, f"no sync-main job, found {sorted(jobs)}"
+    return jobs["sync-main"]
 
 
 def steps(data: dict) -> list:
@@ -126,7 +140,7 @@ def test_permissions_are_exactly_contents_write():
 
 def test_the_suites_run_before_the_merge():
     data = load()
-    gate = index_of(data, "for suite in tests/test_*.py")
+    gate = index_of(data, RUNNER)
     merge = index_of(data, "--no-ff")
     assert gate < merge, (
         f"the merge step is at {merge} and the gate at {gate}: "
@@ -134,30 +148,66 @@ def test_the_suites_run_before_the_merge():
 
 
 def test_each_suite_is_run_the_repository_s_own_way():
-    # A bare "pytest tests/" errors during collection, because most suites here
-    # are script style with a module level sys.exit. Running each file uses the
-    # __main__ runner every suite carries, which works for both styles.
+    # This test used to assert that the gate ran `python3 "${suite}"` on every
+    # file, with a comment explaining that every suite carries a __main__
+    # runner. That belief was false and this test was holding it in place. The
+    # property that actually matters is that each suite is executed the way its
+    # own style runs, which is what the runner does and what the next test
+    # proves the old loop did not.
     data = load()
-    gate = runs(data)[index_of(data, "for suite in tests/test_*.py")]
-    assert 'python3 "${suite}"' in gate, "the gate does not run each suite as a file"
+    gate = runs(data)[index_of(data, RUNNER)]
+    assert RUNNER in gate, "the gate does not call the suite runner"
+    assert (ROOT / RUNNER).exists(), f"{RUNNER} does not exist"
+
+
+def test_the_gate_cannot_go_back_to_running_each_file_with_python3():
+    """The old loop, run against this repository's real suites, proves nothing.
+
+    Held as a test rather than a comment so the mechanism cannot be reinstated
+    on the belief that it works. If this ever fails because every suite has
+    gained a __main__ runner, the loop would still be the weaker check: it
+    would count a suite that prints nothing as passed.
+    """
+    import re as _re
+    vacuous = []
+    for suite in sorted((ROOT / "tests").glob("test_*.py")):
+        source = suite.read_text(encoding="utf-8", errors="ignore")
+        if _re.search(r"^def test_", source, _re.M) and "__main__" not in source:
+            vacuous.append(suite.name)
+    assert vacuous, (
+        "expected at least one pytest style suite with no __main__ runner, "
+        "which is what makes `python3 <file>` an unsound gate")
+    gate = runs(load())[index_of(load(), RUNNER)]
+    assert 'python3 "${suite}"' not in gate, (
+        f"the gate runs each file with python3 again, which executes nothing "
+        f"for {len(vacuous)} suite(s) including {vacuous[0]}")
 
 
 def test_the_browser_suite_is_skipped():
     data = load()
-    text = WORKFLOW.read_text()
-    assert SKIPPED_SUITE in text, f"{SKIPPED_SUITE} is not named anywhere"
-    gate = runs(data)[index_of(data, "for suite in tests/test_*.py")]
-    assert "SKIP_SUITE" in gate, "the gate does not skip anything"
-    assert load()["env"]["SKIP_SUITE"] == SKIPPED_SUITE, (
-        f"the skipped suite is not {SKIPPED_SUITE}")
+    gate = runs(data)[index_of(data, RUNNER)]
+    assert "--no-browser" in gate, (
+        "the gate does not tell the runner to skip the browser suites, so a "
+        "runner with no hub would fail every promotion")
+    # The runner, not the workflow, is where the list lives now. It has to
+    # actually contain the suite this test is named for.
+    runner_source = (ROOT / RUNNER).read_text(encoding="utf-8")
+    assert Path(SKIPPED_SUITE).name in runner_source, (
+        f"{SKIPPED_SUITE} is not in the runner's browser suite list, so it "
+        f"would be run on a machine with no hub")
 
 
 def test_a_failing_suite_stops_the_promotion():
     data = load()
-    gate = runs(data)[index_of(data, "for suite in tests/test_*.py")]
-    assert "exit 1" in gate, "a failing suite does not fail the job"
-    assert "skipped" in gate and "SUITE SUMMARY" in gate, (
-        "the gate does not report which suites ran and which were skipped")
+    gate = runs(data)[index_of(data, RUNNER)]
+    assert "status=$?" in gate, "the gate never reads the runner's exit code"
+    assert 'exit "${status}"' in gate, (
+        "a failing suite does not fail the job, so a red branch could be "
+        "merged into the deploy branch")
+    # And the runner it calls has to be able to say no.
+    runner_source = (ROOT / RUNNER).read_text(encoding="utf-8")
+    assert "SUITES RESULT: FAIL" in runner_source, (
+        "the runner has no failure verdict to report")
 
 
 # ---------------------------------------------------------------------------
@@ -281,11 +331,11 @@ def test_the_merge_names_the_green_gate_as_its_own_precondition():
     condition = str(merge.get("if", ""))
     assert "steps.gate.outputs.green == 'true'" in condition, (
         f"the merge step does not require the gate's green output: {condition!r}")
-    gate_script = runs(load())[index_of(load(), "SUITE SUMMARY")]
+    gate_script = runs(load())[index_of(load(), RUNNER)]
     assert 'echo "green=true" >> "$GITHUB_OUTPUT"' in gate_script, (
         "the gate never publishes the green output the merge step requires")
     # And it is published only after the failure branch has exited.
-    assert gate_script.index("exit 1") < gate_script.index("green=true"), (
+    assert gate_script.index('exit "${status}"') < gate_script.index("green=true"), (
         "the gate publishes green before it has ruled out a failing suite")
 
 
@@ -345,3 +395,108 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"PROMOTE RESULT: PASS {len(tests)}/{len(tests)}")
     sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# Keeping main current, which is what makes the schedule run at all
+# ---------------------------------------------------------------------------
+
+def test_the_deploy_branch_name_is_the_same_everywhere_it_is_written():
+    """The suite claimed to hold these in step and never actually checked.
+
+    If the deploy branch moves and one copy is missed, promotions land on a
+    branch nobody serves and the tools are invisible with every check green.
+    """
+    promote_env = load()["env"]["DEPLOY_BRANCH"]
+    assert promote_env == DEPLOY_BRANCH, (
+        f"promote-to-deploy.yml deploys to {promote_env!r}, not {DEPLOY_BRANCH!r}")
+
+    keep_awake = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "keep-awake.yml").read_text())
+    assert keep_awake["env"]["DEPLOY_BRANCH"] == DEPLOY_BRANCH, (
+        f"keep-awake.yml measures {keep_awake['env']['DEPLOY_BRANCH']!r}")
+
+    assert DEPLOY_BRANCH in (ROOT / "README.md").read_text(), (
+        "README.md does not record the deploy branch")
+
+    # The job guard repeats the name as a literal, because the env context is
+    # not available in a job level condition. That literal has to match too.
+    guard = str(job(load()).get("if", ""))
+    assert DEPLOY_BRANCH in guard, (
+        f"the job guard does not name {DEPLOY_BRANCH}: {guard!r}")
+
+
+def test_main_is_fast_forwarded_after_a_promotion():
+    """Without this, the three hourly wake never runs.
+
+    GitHub triggers a schedule only from the copy of the workflow on the
+    default branch. main is the default branch, and it did not carry
+    keep-awake.yml, so that schedule produced zero runs from the day it was
+    written.
+    """
+    data = load()
+    names = [str(step.get("name", "")) for step in steps(data)]
+    scripts_run = runs(data)
+    syncs = [i for i, script in enumerate(scripts_run) if "HEAD:main" in script]
+    assert syncs, f"no step pushes to main; steps are {names}"
+    merge = index_of(data, "git merge --no-ff")
+    assert min(syncs) > merge, (
+        "main is advanced before the merge, so it could run ahead of the "
+        "deploy branch")
+
+
+def test_a_direct_push_to_the_deploy_branch_still_advances_main():
+    """The promote job excludes the deploy branch, so something else must."""
+    data = load()
+    sync = sync_job(data)
+    guard = str(sync.get("if", ""))
+    assert DEPLOY_BRANCH in guard, (
+        f"the sync job does not run for the deploy branch: {guard!r}")
+    body = "\n".join(str(step.get("run", "")) for step in sync["steps"])
+    assert ":main" in body, "the sync job never pushes to main"
+
+
+def executable_lines(data: dict) -> str:
+    """Every shell line the workflow actually runs, comments stripped.
+
+    Scanning the raw file instead would flag a comment that explains why a flag
+    is not used, which is prose about the rule rather than a break of it.
+    """
+    bodies = [str(step.get("run", "")) for step in steps(data)]
+    bodies += [str(step.get("run", "")) for step in sync_job(data)["steps"]]
+    kept = []
+    for body in bodies:
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#"):
+                kept.append(stripped)
+    return "\n".join(kept)
+
+
+def test_main_is_never_force_pushed():
+    """main is the default branch. A fast forward is the only safe push.
+
+    A rejected fast forward means main has diverged, which is a thing to read
+    and reconcile, never a thing to overwrite.
+    """
+    commands = executable_lines(load())
+    for forbidden in ("--force", "-f origin", "+refs/heads/main",
+                      "--force-with-lease", "push -f"):
+        assert forbidden not in commands, (
+            f"a command in the workflow uses {forbidden!r}, which could "
+            f"rewrite a branch rather than fast forward it")
+
+
+def test_a_failed_main_sync_is_reported_rather_than_swallowed():
+    data = load()
+    scripts_run = runs(data)
+    syncs = [script for script in scripts_run if "HEAD:main" in script]
+    syncs += [str(step.get("run", "")) for step in sync_job(data)["steps"]
+              if ":main" in str(step.get("run", ""))]
+    assert syncs, "no sync step found"
+    for script in syncs:
+        assert "::error::" in script, (
+            "a sync step fails without an error annotation, so a main branch "
+            "that stopped tracking would be silent")
+        assert "exit 1" in script, (
+            "a sync step reports an error without failing the job")

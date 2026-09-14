@@ -286,7 +286,20 @@ def test_the_workflow_is_valid_yaml_and_scheduled_often_enough():
     triggers = data.get("on", data.get(True))
     assert triggers is not None, "the workflow declares no triggers"
     crons = [entry["cron"] for entry in triggers["schedule"]]
-    assert "0 */3 * * *" in crons, f"unexpected schedule: {crons}"
+    assert crons, "the workflow is not scheduled at all"
+    # The property is the interval, not one exact string. Pinning the string
+    # made this test refuse a change that was made on GitHub's own advice.
+    minutes, hours = crons[0].split()[0], crons[0].split()[1]
+    assert hours.startswith("*/"), f"not an every N hours schedule: {crons}"
+    every = int(hours[2:])
+    assert 1 <= every <= 3, (
+        f"a wake every {every} hours leaves too long a gap before Community "
+        f"Cloud sleeps the app: {crons}")
+    # And not on the hour. GitHub documents that the schedule event is delayed
+    # under high load, that load peaks at the start of every hour, and that
+    # queued jobs may be dropped then. A dropped wake is a sleeping app.
+    assert minutes.isdigit() and int(minutes) != 0, (
+        f"the wake is scheduled on the busiest minute of the hour: {crons}")
     assert "workflow_dispatch" in triggers
     assert "push" in triggers, "a push must wake the app so a new tool shows up"
     # Read only credentials: this job has no business writing to the repository.

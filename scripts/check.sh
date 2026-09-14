@@ -19,59 +19,14 @@ BASE="http://127.0.0.1:${PORT}"
 MODE="${1:-full}"
 LOG="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.log"
 
-UNIT_SUITES=(
-  tests/test_hub.py
-  tests/test_canonical_url.py
-  tests/test_wp_form_debugger_core.py
-  tests/test_app_smoke.py
-  tests/test_php_syntax.py
-  tests/test_netsuite_hubspot_sync.py
-  tests/test_netsuite_hubspot_sync_page.py
-  tests/test_multi_channel_inventory_sync.py
-  tests/test_multi_channel_inventory_sync_page.py
-)
-BROWSER_SUITES=(
-  tests/test_tool_urls.py
-  tests/test_theme.py
-  tests/test_browser_inventory_flow.py
-)
-
-# Browser suites that start their own servers, so they take no base URL. The
-# sidebar invariant needs two hubs at once, one of them with a padded tool
-# list, which is not something the shared hub on ${PORT} can be.
-SELF_HOSTED_BROWSER_SUITES=(
-  tests/test_sidebar_invariant.py
-)
-
-# Suites written for pytest rather than the standalone script style.
-PYTEST_SUITES=(
-  tests/test_zero_trust_rmm_console.py
-  tests/test_zero_trust_rmm_console_page.py
-  tests/test_pod_automation_router.py
-  tests/test_pod_automation_router_page.py
-  tests/test_tv_mt5_bridge_diagnostic.py
-  tests/test_tv_mt5_bridge_diagnostic_page.py
-  tests/test_sharepoint_zero_trust_simulator.py
-  tests/test_sharepoint_zero_trust_simulator_page.py
-  tests/test_retreat_funnel_redundancy_guard.py
-  tests/test_retreat_funnel_redundancy_guard_page.py
-  tests/test_web3_smart_escrow_console.py
-  tests/test_web3_smart_escrow_console_page.py
-  tests/test_ten_dlc_compliance_validator.py
-  tests/test_ten_dlc_compliance_validator_page.py
-  tests/test_reventure_conversion_engine.py
-  tests/test_reventure_conversion_engine_page.py
-  tests/test_airtable_whatsapp_automation_guard.py
-  tests/test_airtable_whatsapp_automation_guard_page.py
-  tests/test_m365_intranet_architecture_console.py
-  tests/test_m365_intranet_architecture_console_page.py
-  tests/test_wastetab_dispatch_engine.py
-  tests/test_wastetab_dispatch_engine_page.py
-  tests/test_aerial_insights_qa_console.py
-  tests/test_aerial_insights_qa_console_page.py
-  tests/test_askew_suit_engine.py
-  tests/test_askew_suit_engine_page.py
-)
+# There is no list of suites here any more. There were three, they were
+# maintained by hand, and eight suites had already been forgotten by the time
+# anyone looked, including both suites for the newest tool. scripts/run_suites.py
+# discovers every tests/test_*.py, runs each one the way its own style actually
+# executes, and fails any suite that cannot show that checks ran. The promotion
+# workflow calls the same script, so the gate that guards the live app and the
+# gate a person runs locally cannot drift apart.
+RUNNER=scripts/run_suites.py
 
 STAMP="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.started"
 
@@ -126,44 +81,10 @@ ensure_hub() {
   return 1
 }
 
-total=0; failed=0; started=$(date +%s%N)
-run_suite() {
-  local suite="$1"; shift
-  local s e out secs
-  s=$(date +%s%N)
-  out=$(python3 "$suite" "$@" 2>&1 | grep -vE "ScriptRunContext" | tail -1)
-  e=$(date +%s%N)
-  secs=$(awk "BEGIN{printf \"%.1f\", ($e-$s)/1000000000}")
-  printf '  %-50s %6ss  %s\n' "$suite" "$secs" "$out"
-  if echo "$out" | grep -qE "PASS|SKIP"; then
-    n=$(echo "$out" | grep -oE '[0-9]+/[0-9]+' | cut -d/ -f1)
-    total=$((total + ${n:-0}))
-  else
-    failed=$((failed + 1))
-  fi
-}
-
-run_pytest() {
-  local s e out secs
-  s=$(date +%s%N)
-  out=$(python3 -m pytest "$@" -q 2>&1 | tail -1)
-  e=$(date +%s%N)
-  secs=$(awk "BEGIN{printf \"%.1f\", ($e-$s)/1000000000}")
-  printf '  %-50s %6ss  %s\n' "pytest (${#} file(s))" "$secs" "$out"
-  if echo "$out" | grep -qE "[0-9]+ passed"; then
-    n=$(echo "$out" | grep -oE "[0-9]+ passed" | grep -oE "[0-9]+")
-    total=$((total + ${n:-0}))
-  else
-    failed=$((failed + 1))
-  fi
-}
-
-echo "== Suites =="
-for suite in "${UNIT_SUITES[@]}"; do run_suite "$suite"; done
-run_pytest "${PYTEST_SUITES[@]}"
+started=$(date +%s%N)
 
 if [ "$MODE" != "fast" ]; then
-  # A guard that skips itself is not a guard. Both browser suites exit 0 with a
+  # A guard that skips itself is not a guard. The browser suites exit 0 with a
   # SKIP line when Playwright or a hub is missing, which is right for a
   # developer running one by hand and wrong for the gate: it would report a
   # clean pass on a machine where the layout was never measured at all. Setting
@@ -171,14 +92,19 @@ if [ "$MODE" != "fast" ]; then
   # way to deliberately not run them.
   export TOOLBENCH_REQUIRE_BROWSER=1
   ensure_hub || exit 1
-  for suite in "${BROWSER_SUITES[@]}"; do run_suite "$suite" "$BASE"; done
-  for suite in "${SELF_HOSTED_BROWSER_SUITES[@]}"; do run_suite "$suite"; done
+  python3 "$RUNNER" --base "$BASE"
+  failed=$?
 else
-  echo "  (browser suites skipped: fast mode)"
+  python3 "$RUNNER" --no-browser
+  failed=$?
 fi
 
 ended=$(date +%s%N)
 echo "-------------------------------------------------------------------------"
-printf 'TOTAL %s checks passed, %s suite(s) failed, wall clock %ss\n' \
-  "$total" "$failed" "$(awk "BEGIN{printf \"%.1f\", ($ended-$started)/1000000000}")"
-[ "$failed" -eq 0 ] || exit 1
+# The runner has already printed how many suites ran and how many checks
+# actually executed. Counting that again here would be a second tally to keep
+# in step with the first, which is the habit that produced a list of suites
+# nobody had updated in eight tools.
+printf 'wall clock %ss\n' \
+  "$(awk "BEGIN{printf \"%.1f\", ($ended-$started)/1000000000}")"
+exit "$failed"
