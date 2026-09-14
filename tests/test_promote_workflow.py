@@ -346,11 +346,70 @@ def test_every_git_command_in_the_merge_step_is_checked():
     # success that never happened. A rejected push is the dangerous one,
     # because the job goes green while the live app is unchanged.
     script = runs(load())[index_of(load(), "git merge --no-ff")]
-    for command in ("git checkout -B", "git push origin"):
-        assert f"if ! {command}" in script, (
-            f"{command!r} is not checked, so a failure would be reported as success")
+
+    # Checked in either direction. `if ! git push` and `if git push; then
+    # ...; fi` are both examinations of the result; only a bare `git push` on
+    # its own line is not. Asserting one spelling made this test refuse a
+    # retry loop that is strictly safer than what it was guarding.
+    allowed_unchecked = (
+        "git config",          # cannot meaningfully fail on a fresh runner
+        "git merge --abort",   # already on the failure path, and || true
+        "git diff",            # read only, inside a substitution
+    )
+    unchecked = []
+    for line in script.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("git "):
+            continue
+        if stripped.startswith(allowed_unchecked):
+            continue
+        unchecked.append(stripped)
+    assert not unchecked, (
+        "these git commands are neither inside a conditional nor allowed to "
+        f"fail, so a failure would be reported as success: {unchecked}")
+
+    for command in ("git checkout -B", "git push origin", "git merge --no-ff"):
+        assert (f"if ! {command}" in script) or (f"if {command}" in script), (
+            f"{command!r} is not checked in either direction")
     assert script.count("exit 1") >= 3, (
         "each of checkout, merge and push needs its own failure exit")
+
+
+def test_a_moving_deploy_branch_is_retried_rather_than_handed_to_a_person():
+    """A rejected push means the base moved, not that something is wrong.
+
+    Per branch concurrency queues let two promotions run at once on purpose,
+    so the merge step has to expect the branch to move under it. Fetching once
+    at the start and pushing once at the end turned a safe, green promotion
+    into a red job waiting for a human, with the finished tool merged nowhere.
+    """
+    script = runs(load())[index_of(load(), "git merge --no-ff")]
+    assert "attempt" in script, "the merge never retries"
+    assert script.count("git fetch origin") >= 1, (
+        "the merge never refreshes the deploy branch, so a retry would push "
+        "the same rejected commit again")
+    # The refresh has to be inside the loop, not before it.
+    loop_start = script.index("while ")
+    assert script.index("git fetch origin", loop_start) > loop_start, (
+        "the fetch is outside the retry loop, so every attempt uses the same "
+        "stale base")
+    # A conflict must not be retried: it would conflict identically.
+    assert "A retry would" in script, (
+        "the conflict path does not say why it is not retried")
+
+
+def test_two_session_branches_do_not_evict_each_other_from_the_queue():
+    """GitHub holds one pending run per concurrency group.
+
+    A single shared group meant a third push cancelled whatever was queued, so
+    a finished tool never reached the deploy branch and the only trace was a
+    grey cancelled run.
+    """
+    group = str(load()["concurrency"]["group"])
+    assert "github.ref" in group, (
+        f"the concurrency group is shared across branches: {group!r}")
+    assert load()["concurrency"]["cancel-in-progress"] is False, (
+        "a promotion in flight can be cancelled part way through")
 
 
 def test_a_branch_name_is_never_pasted_into_the_shell():

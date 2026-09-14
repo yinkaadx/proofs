@@ -26,7 +26,19 @@ on:
 # is proved green is the branch and not the combination. The narrower claim is
 # the true one, and the prober at the end is what looks at the merged result.
 concurrency:
-  group: promote-to-deploy
+  # One queue per session branch, not one queue for the whole repository.
+  # GitHub holds at most a single pending run per group, so a shared group
+  # means a third push evicts whatever was waiting: branch A runs, branch B
+  # queues, branch C arrives and B is cancelled. B's finished tool then never
+  # reaches the deploy branch and the only trace is a grey cancelled run that
+  # reads like housekeeping, which is the same end state this workflow exists
+  # to prevent.
+  #
+  # Per branch queues let two promotions run at once, so the merge step below
+  # re-fetches and retries rather than assuming it is alone. That is the right
+  # place for the race to be handled: git already detects it exactly, by
+  # rejecting a push that is not a fast forward.
+  group: promote-to-deploy-${{ github.ref }}
   cancel-in-progress: false
 
 # Writing to the repository is the whole job. Nothing else is needed, so
@@ -160,32 +172,63 @@ jobs:
           # use set -e, so that the conflict path can clean up before exiting,
           # and an unchecked command would therefore fail silently and let the
           # final echo report a success that never happened.
-          if ! git checkout -B "${DEPLOY_BRANCH}" "origin/${DEPLOY_BRANCH}"; then
-            echo "FAIL could not check out ${DEPLOY_BRANCH} from origin."
-            echo "Nothing was merged and nothing was pushed."
-            exit 1
-          fi
+          #
+          # The whole sequence retries, because the deploy branch can move
+          # while this job runs. It used to fetch once at the start and push
+          # once at the end, so a push that landed in between turned a
+          # promotion that was green and safe into a red job waiting for a
+          # human, and the finished tool sat merged nowhere until someone
+          # noticed. A rejected push is not an error to report, it is a stale
+          # base to refresh.
+          attempts=3
+          attempt=1
+          while [ "${attempt}" -le "${attempts}" ]; do
+            if ! git fetch origin "+refs/heads/${DEPLOY_BRANCH}:refs/remotes/origin/${DEPLOY_BRANCH}"; then
+              echo "FAIL could not fetch ${DEPLOY_BRANCH} from origin."
+              exit 1
+            fi
 
-          if ! git merge --no-ff -m "Promote ${SESSION_BRANCH} to ${DEPLOY_BRANCH} after a green suite run" "${SESSION_SHA}"; then
-            conflicts="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
-            git merge --abort || true
-            echo
-            echo "FAIL the merge conflicts in: ${conflicts}"
-            echo "The merge was aborted and nothing was pushed. Resolve those"
-            echo "files on ${SESSION_BRANCH} and push again."
-            exit 1
-          fi
+            if git merge-base --is-ancestor "${SESSION_SHA}" "origin/${DEPLOY_BRANCH}"; then
+              echo "${SESSION_SHA} reached ${DEPLOY_BRANCH} while this job ran."
+              echo "Another run promoted it. Nothing left to do."
+              exit 0
+            fi
 
-          if ! git push origin "${DEPLOY_BRANCH}"; then
-            echo
-            echo "FAIL the push to ${DEPLOY_BRANCH} was rejected. The merge"
-            echo "exists only in this runner and the live app is unchanged."
-            echo "A branch protection rule, or a push that landed on"
-            echo "${DEPLOY_BRANCH} while this job was running, are the usual"
-            echo "causes. Nothing has been lost: rerun this job."
-            exit 1
-          fi
-          echo "Merged ${SESSION_BRANCH} into ${DEPLOY_BRANCH} and pushed."
+            if ! git checkout -B "${DEPLOY_BRANCH}" "origin/${DEPLOY_BRANCH}"; then
+              echo "FAIL could not check out ${DEPLOY_BRANCH} from origin."
+              echo "Nothing was merged and nothing was pushed."
+              exit 1
+            fi
+
+            if ! git merge --no-ff -m "Promote ${SESSION_BRANCH} to ${DEPLOY_BRANCH} after a green suite run" "${SESSION_SHA}"; then
+              conflicts="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+              git merge --abort || true
+              echo
+              echo "FAIL the merge conflicts in: ${conflicts}"
+              echo "The merge was aborted and nothing was pushed. A retry would"
+              echo "conflict identically, so this needs a person: resolve those"
+              echo "files on ${SESSION_BRANCH} and push again."
+              exit 1
+            fi
+
+            if git push origin "${DEPLOY_BRANCH}"; then
+              echo "Merged ${SESSION_BRANCH} into ${DEPLOY_BRANCH} and pushed."
+              exit 0
+            fi
+
+            echo "Attempt ${attempt} of ${attempts}: the push was rejected, so"
+            echo "${DEPLOY_BRANCH} moved while this job ran. Refreshing and"
+            echo "merging again."
+            attempt=$((attempt + 1))
+          done
+
+          echo
+          echo "FAIL the push to ${DEPLOY_BRANCH} was rejected ${attempts} times."
+          echo "The merge exists only in this runner and the live app is"
+          echo "unchanged. A branch protection rule is the likely cause, since"
+          echo "a moving branch would have been picked up by the refresh."
+          echo "Nothing has been lost: rerun this job."
+          exit 1
 
       - name: Fast forward main so the schedule keeps working
         # GitHub runs a schedule: trigger only from the copy of a workflow file

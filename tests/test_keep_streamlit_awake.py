@@ -192,7 +192,7 @@ def test_an_app_that_never_rendered_fails_loudly():
     code, lines = ka.verdict([result])
     assert code == 1
     assert any(line.strip().startswith("FAIL") for line in lines)
-    assert lines[-1] == "KEEPALIVE RESULT: FAIL 1 of 1 apps not awake"
+    assert lines[-1] == "KEEPALIVE RESULT: FAIL 1 of 1 apps, 1 not awake"
 
 
 def test_a_stale_deploy_fails_and_names_the_missing_tools():
@@ -213,17 +213,25 @@ def test_a_tool_that_could_not_be_read_is_not_called_missing():
     # The first live run declared all seventeen tools missing from an app that
     # was serving every one of them, because a lookup timeout was recorded the
     # same way as a landing page fallback. A failed read means the prober did
-    # not look, which is not evidence about the deploy at all.
+    # not look, which is not evidence that the tool is absent.
+    #
+    # This test used to go one step further and assert the run PASSED, which
+    # was the defect: not evidence of absence is not evidence of presence
+    # either, so a run that read nothing certified a deploy it never saw. The
+    # distinction the test is named for still holds and is what it checks now.
     result = ka.AppResult(url="https://x.streamlit.app", reachable=True,
-                          awake=True, health="ok",
+                          awake=True, health="ok", tools_requested=19,
                           unchecked_tools=["wp-form-debugger (TimeoutError)"])
-    assert result.ok is True, "an unreadable tool page must not fail the run"
+    assert result.missing_tools == [], (
+        "an unreadable tool page must never be reported as missing")
+    assert result.unproven, "the deploy is unproven, neither fresh nor stale"
     code, lines = ka.verdict([result])
-    assert code == 0
+    assert code == 1, "a run that verified nothing must not exit 0"
     body = "\n".join(lines)
     assert "could not read" in body, "the unread tool is not reported at all"
     assert "wp-form-debugger" in body
-    assert lines[-1] == "KEEPALIVE RESULT: PASS 1/1 apps awake"
+    assert "stale" in body and "UNPROVEN" in body, (
+        "the report must say unproven rather than accusing the deploy")
 
 
 def test_a_proved_stale_deploy_still_fails():
@@ -258,7 +266,7 @@ def test_one_bad_app_among_several_fails_the_whole_run():
     bad = ka.AppResult(url="https://b.streamlit.app", error="navigation failed")
     code, lines = ka.verdict([good, bad])
     assert code == 1
-    assert lines[-1] == "KEEPALIVE RESULT: FAIL 1 of 2 apps not awake"
+    assert lines[-1] == "KEEPALIVE RESULT: FAIL 1 of 2 apps, 1 not awake"
 
 
 def test_the_selectors_match_what_community_cloud_actually_renders():
@@ -339,3 +347,74 @@ if __name__ == "__main__":
         sys.exit(1)
     print(f"KEEPALIVE UNIT RESULT: PASS {len(tests)}/{len(tests)}")
     sys.exit(0)
+
+
+# ---------------------------------------------------------------------------
+# A prober that read nothing has not proved anything
+# ---------------------------------------------------------------------------
+
+APP = "https://proofs-toolbench.streamlit.app"
+
+
+def test_a_run_that_could_not_read_one_tool_does_not_report_pass():
+    """The confirmed defect: unchecked tools were ignored by the verdict.
+
+    A failed read is not evidence that a tool is absent. It is not evidence
+    that it is present either, and only the first half was implemented, so a
+    run in which every single read timed out found nothing missing and
+    certified the deploy as current.
+    """
+    every_read_failed = ka.AppResult(
+        url=APP, reachable=True, awake=True, health="ok", tools_requested=19,
+        unchecked_tools=[f"tool-{i} (TimeoutError)" for i in range(19)])
+    assert not every_read_failed.ok
+    assert every_read_failed.unproven
+    code, lines = ka.verdict([every_read_failed])
+    assert code == 1, "a run that read nothing exited 0"
+    assert "UNPROVEN" in "\n".join(lines)
+
+
+def test_one_unreadable_tool_is_still_not_a_pass():
+    result = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                          tools_requested=19,
+                          unchecked_tools=["askew-suit-engine (TimeoutError)"])
+    assert not result.ok
+    assert ka.verdict([result])[0] == 1
+
+
+def test_an_unproven_deploy_is_not_reported_as_a_sleeping_app():
+    """Two different failures. Saying the wrong one sends someone to the wrong
+    place: the app in this case is awake and serving."""
+    unproven = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                            tools_requested=19,
+                            unchecked_tools=["a (TimeoutError)"])
+    asleep = ka.AppResult(url=APP, error="the app never rendered")
+    assert "awake but unproven" in ka.verdict([unproven])[1][-1]
+    assert "not awake" in ka.verdict([asleep])[1][-1]
+
+
+def test_a_genuinely_stale_deploy_still_fails_as_stale_not_unproven():
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=19,
+                         missing_tools=["pipedrive-integration-engine (landing page)"])
+    assert not stale.ok
+    assert not stale.unproven, "a confirmed missing tool is stale, not unproven"
+    assert "missing from the live app" in "\n".join(ka.verdict([stale])[1])
+
+
+def test_every_tool_confirmed_is_the_only_thing_that_passes():
+    clean = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=19)
+    assert clean.ok
+    code, lines = ka.verdict([clean])
+    assert code == 0
+    assert "all 19 tools confirmed" in "\n".join(lines)
+
+
+def test_a_wake_only_run_does_not_demand_tool_verification():
+    """Without --verify-tools nothing was asked about tools, so nothing is
+    owed about them."""
+    wake_only = ka.AppResult(url=APP, reachable=True, awake=True, health="ok")
+    assert wake_only.tools_requested == 0
+    assert wake_only.ok
+    assert ka.verdict([wake_only])[0] == 0

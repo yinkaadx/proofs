@@ -96,14 +96,35 @@ class AppResult:
     awake: bool = False
     health: str = ""
     missing_tools: list[str] = field(default_factory=list)
-    # Tools the prober could not read at all. Reported, never fatal: a failed
-    # lookup is not evidence that a tool is absent from the live app.
+    # Tools the prober could not read at all. A failed lookup is not evidence
+    # that a tool is absent from the live app. It is not evidence that the tool
+    # is present either, and that second half was missing: a run in which every
+    # single read failed left missing_tools empty and reported PASS, certifying
+    # a deploy it had not looked at once. Asked to prove the deploy is current,
+    # a prober that proved nothing has not passed.
     unchecked_tools: list[str] = field(default_factory=list)
+    # How many tools this run was asked to verify. Zero means it was not asked,
+    # so the two lists below carry no weight either way.
+    tools_requested: int = 0
     error: str = ""
 
     @property
+    def verified(self) -> bool:
+        """Every tool this run was asked about was positively resolved."""
+        if not self.tools_requested:
+            return True
+        return not self.missing_tools and not self.unchecked_tools
+
+    @property
+    def unproven(self) -> bool:
+        """Awake, nothing found missing, and nothing actually confirmed."""
+        return bool(self.tools_requested and self.unchecked_tools
+                    and not self.missing_tools)
+
+    @property
     def ok(self) -> bool:
-        return self.awake and not self.missing_tools and not self.error
+        return (self.awake and not self.error and not self.missing_tools
+                and self.verified)
 
 
 def normalize_app_url(value: str) -> str:
@@ -190,19 +211,26 @@ def verdict(results: list[AppResult]) -> tuple[int, list[str]]:
     for result in results:
         if result.ok:
             state = "woken from sleep" if result.was_asleep else "already awake"
-            lines.append(f"  ok   {result.url} {state}")
-            if result.unchecked_tools:
-                lines.append(f"       note: could not read "
-                             f"{len(result.unchecked_tools)} tool page(s): "
-                             f"{', '.join(result.unchecked_tools)}. Not counted "
-                             f"as missing, because a failed read is not "
-                             f"evidence of a stale deploy.")
+            checked = (f", all {result.tools_requested} tools confirmed"
+                       if result.tools_requested else "")
+            lines.append(f"  ok   {result.url} {state}{checked}")
         else:
             if result.error:
                 reason = result.error
             elif result.missing_tools:
                 reason = ("registered tools missing from the live app: "
                           + ", ".join(result.missing_tools))
+            elif result.unproven:
+                # Deliberately not "stale" and deliberately not a pass. The
+                # prober failed to look, so the only honest report is that the
+                # deploy is unproven, and a job asked to prove it must not
+                # exit 0 having proved nothing.
+                confirmed = result.tools_requested - len(result.unchecked_tools)
+                reason = (f"could not read {len(result.unchecked_tools)} of "
+                          f"{result.tools_requested} tool page(s), so the "
+                          f"deploy is UNPROVEN rather than stale "
+                          f"({confirmed} confirmed): "
+                          + ", ".join(result.unchecked_tools))
             else:
                 reason = "the app never rendered"
             lines.append(f"  FAIL {result.url} {reason}")
@@ -210,8 +238,20 @@ def verdict(results: list[AppResult]) -> tuple[int, list[str]]:
     passed = len([r for r in results if r.ok])
     total = len(results)
     if passed != total:
+        # An app that is awake but whose tools could not be read is a different
+        # failure from an app that never came up, and saying "not awake" about
+        # a running app sends whoever reads this log looking in the wrong
+        # place.
+        unproven = len([r for r in results if r.unproven])
+        asleep = total - passed - unproven
+        parts = []
+        if asleep:
+            parts.append(f"{asleep} not awake")
+        if unproven:
+            parts.append(f"{unproven} awake but unproven")
         lines.append("")
-        lines.append(f"KEEPALIVE RESULT: FAIL {total - passed} of {total} apps not awake")
+        lines.append(f"KEEPALIVE RESULT: FAIL {total - passed} of {total} apps, "
+                     + ", ".join(parts))
         return 1, lines
     lines.append("")
     lines.append(f"KEEPALIVE RESULT: PASS {passed}/{total} apps awake")
@@ -413,6 +453,9 @@ def run(apps: list[str], tools: list[tuple[str, str]],
         for index, app in enumerate(apps):
             print(f"== {app} ==")
             result = visit(page, app, shots, label=f"app{index + 1}")
+            # Recorded before the reads, not after, so a run that fails to read
+            # every single page still knows how many it was supposed to prove.
+            result.tools_requested = len(tools)
             if result.awake and tools:
                 # Take the landing page as it stands right now, so a tool page
                 # is measured against this app rather than a hardcoded string.
