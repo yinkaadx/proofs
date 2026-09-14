@@ -74,6 +74,8 @@ python3 tests/test_netsuite_hubspot_sync_page.py  # sync console page
 # The Pipedrive suites run under pytest as well as standalone
 python3 -m pytest tests/test_pipedrive_integration_engine.py \
                  tests/test_pipedrive_integration_engine_page.py -q
+
+python3 tests/test_keep_streamlit_awake.py    # the keep awake prober
 ```
 
 Every suite declares its pass and fail markers before running and parses results
@@ -94,6 +96,44 @@ streamlit run streamlit_app.py --server.port 8503 --server.headless true &
 python3 tests/test_theme.py http://127.0.0.1:8503
 ```
 
+## Staying awake, and staying current
+
+Community Cloud sleeps an app after a spell with no visitor, and a plain HTTP
+ping does not count as one: the app URL answers 200 from a static shell whether
+the app is running or fast asleep, so an ordinary uptime monitor reports green
+on a sleeping app. `.github/workflows/keep-awake.yml` drives a real headless
+Chromium instead, every three hours and on every push.
+
+One run opens each app in the list, clicks "Yes, get this app back up!" if the
+sleep screen is showing, waits for the app itself to render inside the app
+frame, then dwells long enough for Community Cloud to count the session as a
+visit, which is what resets the inactivity clock. It saves a screenshot and a
+JSON summary as evidence on every run.
+
+The same run also proves the live app is current. It reads the tool list from
+the branch Community Cloud actually deploys from, opens every registered tool
+URL, and checks the tool really rendered. Streamlit does not error on an
+unknown page path, it quietly serves the landing page instead, so the landing
+page is the tell: if `/some-tool` renders the same main column as `/`, the
+running app has never heard of that tool and the deploy is stale. That is the
+failure that used to be found only by rebooting the app by hand.
+
+| Item | Value |
+| --- | --- |
+| Apps kept awake | `.github/streamlit-apps.txt`, one URL per line |
+| Schedule | Every three hours, plus every push, plus manual dispatch |
+| Prober | `scripts/keep_streamlit_awake.py` |
+| Evidence | Screenshot and `keepalive-summary.json`, kept as a run artifact |
+
+Adding a future app to the guarantee is one line in
+`.github/streamlit-apps.txt`. Nothing else changes.
+
+Two limits worth knowing. GitHub only runs scheduled workflows from the
+default branch, so the cron fires from `main`; pushes to any branch also
+trigger it. And GitHub disables scheduled workflows in a repository with no
+commits for 60 days, so a repository left completely idle for two months needs
+one commit to re arm the schedule.
+
 ## Layout
 
 | Path | Purpose |
@@ -103,6 +143,7 @@ python3 tests/test_theme.py http://127.0.0.1:8503
 | `tools/<tool>/page.py` | A tool's Streamlit page, exposing `render()` |
 | `tools/<tool>/core.py` | A tool's logic, with no Streamlit dependency |
 | `shared/theme.py` | The shared stylesheet and helpers, so every tool looks like one product |
+| `scripts/keep_streamlit_awake.py` | Wakes every live app and proves the deploy is current |
 | `tests/` | All test suites |
 | `.streamlit/config.toml` | Theme and client settings |
 | `requirements.txt` | Runtime dependencies |

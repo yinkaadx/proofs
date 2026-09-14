@@ -1,0 +1,9 @@
+# Every Streamlit Community Cloud app that must never sleep.
+#
+# One URL per line. Adding a future app to the never sleep guarantee is a
+# single line here and nothing else: the keep awake workflow reads this file
+# on every run, so no workflow edit is ever needed.
+#
+# Blank lines and anything after a # are ignored.
+
+https://proofs-toolbench.streamlit.app
