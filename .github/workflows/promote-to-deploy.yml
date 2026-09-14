@@ -205,30 +205,40 @@ jobs:
           fi
           echo "Merged ${SESSION_BRANCH} into ${DEPLOY_BRANCH} and pushed."
 
-      - name: Wake the live app so the merge actually deploys
+      - name: Wake the live app and confirm the merge actually deployed
         # A push made with GITHUB_TOKEN does not trigger other workflows, so
         # keep-awake.yml will not fire for the push above. Without this the
         # newly merged tool would sit undeployed until something else happened
-        # to wake the app, which could be hours.
+        # to wake the app.
         #
-        # The merge has already succeeded by this point and is already public.
-        # An unreachable app is worth reporting, but it is not a reason to
-        # paint the promotion red.
+        # This step used to swallow its own result and stay green. That is
+        # precisely how a tool sat on the deploy branch, merged and tested,
+        # while the live app served an older build and nobody was told. The
+        # merge cannot be undone from here and should not be, but a deploy
+        # that never landed is a failure and now reads as one.
         if: steps.plan.outputs.needed == 'true' && steps.merge.outcome == 'success'
-        continue-on-error: true
         run: |
           set -uo pipefail
           python3 -m pip install playwright
           python3 -m playwright install --with-deps chromium
-          # The working tree is the deploy branch after the merge, so the
-          # registry checked against the live app is the one just shipped.
-          if python3 scripts/keep_streamlit_awake.py --verify-tools; then
-            echo "The live app is awake and serving every registered tool."
-          else
-            echo "The prober could not confirm the live app."
-            echo "The merge to ${DEPLOY_BRANCH} succeeded and is already pushed."
-            echo "Community Cloud will pick it up on the next visit or wake."
-          fi
+
+          # Community Cloud rebuilds after the push above and that takes time,
+          # so one look a second after the merge would report a stale deploy
+          # that is merely a young one. Look repeatedly instead, and only call
+          # it stale once it has had several minutes to catch up.
+          for attempt in 1 2 3 4 5 6 7 8; do
+            # The working tree is the deploy branch after the merge, so the
+            # registry checked against the live app is the one just shipped.
+            if python3 scripts/keep_streamlit_awake.py --verify-tools; then
+              echo "The live app is awake and serving every registered tool."
+              exit 0
+            fi
+            echo "Attempt ${attempt} of 8: the live app is not current yet."
+            sleep 60
+          done
+
+          echo "::error::The merge to ${DEPLOY_BRANCH} succeeded, but the live app is still serving an older build after eight minutes of retries. Community Cloud has not rebuilt. Reboot the app from its Streamlit Community Cloud dashboard."
+          exit 1
 
       - name: Say so when there was nothing to promote
         if: steps.plan.outputs.needed == 'false'

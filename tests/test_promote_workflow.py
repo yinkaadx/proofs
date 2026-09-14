@@ -223,17 +223,22 @@ def test_the_prober_runs_after_the_merge():
     assert "playwright" in prober, "the prober has no browser to drive"
 
 
-def test_an_unreachable_app_does_not_fail_the_promotion():
+def test_a_deploy_that_never_landed_is_reported_as_a_failure():
+    # This step used to carry continue-on-error and swallow its own result, so
+    # a tool could be merged, tested and green while the live app served an
+    # older build and nobody was told. That is the exact failure the owner
+    # noticed by hand, so it is now a red job rather than a quiet one.
     data = load()
-    wake = index_of(data, "keep_streamlit_awake.py")
-    step = steps(data)[wake]
-    assert step.get("continue-on-error") is True, (
-        "an unreachable app would paint a successful merge red")
+    wake = steps(data)[index_of(data, "keep_streamlit_awake.py")]
+    assert wake.get("continue-on-error") is not True, (
+        "the deploy confirmation swallows its own result again")
+    script = str(wake.get("run", ""))
+    assert "::error::" in script, "a stale deploy produces no error annotation"
+    assert "exit 1" in script, "a stale deploy does not fail the job"
+    # And it must retry, or it would call a merge stale one second after making it.
+    assert "for attempt in" in script, "the deploy check does not retry"
+    assert "sleep 60" in script, "the deploy check retries with no wait between"
 
-
-# ---------------------------------------------------------------------------
-# Concurrency and the clock
-# ---------------------------------------------------------------------------
 
 def test_two_session_branches_cannot_race_a_merge():
     data = load()
