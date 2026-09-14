@@ -10,6 +10,7 @@ from __future__ import annotations
 import streamlit as st
 
 from shared import theme
+from shared.build_info import build_label
 from tools.registry import Tool, all_tools
 
 st.set_page_config(
@@ -64,8 +65,26 @@ TOOL_PAGES = [
 
 HOME_PAGE = st.Page(home, title="Home", icon="🧰", url_path="home", default=True)
 
+# The tool list lives in a top bar, not in the sidebar, so the sidebar belongs
+# to the tool you are actually using.
+#
+# It sat in the sidebar until sixteen tools made that untenable. The list alone
+# ran to 563 pixels before the current tool's "How to use" even began, and at a
+# larger text size it pushed the help off the bottom entirely. Reordering the
+# sidebar did not fix that, because the order was never the problem: a list
+# that grows every week was sitting in front of the one block that changes with
+# the page you are on.
+#
+# The top bar reads better too. It shows every tool name in full, where the
+# sidebar truncated the longer ones with an ellipsis.
+st.navigation({"Overview": [HOME_PAGE], "Tools": TOOL_PAGES},
+              position="top").run()
+
 with st.sidebar:
+    st.divider()
     st.markdown("### Toolbench")
     st.caption("Diagnostic tools for client work.")
-
-st.navigation({"Overview": [HOME_PAGE], "Tools": TOOL_PAGES}).run()
+    # State the running build. A hosted Streamlit app can serve an old commit
+    # without saying so, which has already caused a tool to be reported live at
+    # a URL the running app had never heard of.
+    st.caption(build_label())

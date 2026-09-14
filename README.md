@@ -26,6 +26,27 @@ browser. Creating one app per tool means one manual step per tool, forever. One
 hub app means that step happens once in total, and every tool after that ships
 by pushing code.
 
+## Tool URLs
+
+Never compose a tool URL by hand. Print them from the registry, which is the
+same source the hub builds its navigation from:
+
+```bash
+python3 scripts/urls.py                 # live hub
+python3 scripts/urls.py http://127.0.0.1:8600
+```
+
+A path is only *proven* once `tests/test_tool_urls.py` has opened it in a real
+browser. That suite walks the registry, so every tool is covered automatically
+the moment it is registered, and it fails if a page is Streamlit's not found
+fallback, if a tool's title is missing, or if the hub is serving an older commit
+than the checkout. It also checks that a deliberately invalid path still reports
+not found, so the suite cannot pass vacuously.
+
+The hub prints the commit it is running in its sidebar, as `build <sha>`. If
+that does not match the commit you expect, the deployment is stale and needs a
+reboot, not a fix.
+
 ## Tools
 
 | Tool | Path | What it does |
@@ -34,6 +55,9 @@ by pushing code.
 | [NetSuite HubSpot Idempotent Sync Console](tools/netsuite_hubspot_sync/README.md) | `/netsuite-hubspot-sync` | Deal sync simulator, account matching, SHA256 idempotency ledger and SharePoint audit feed |
 | [Pipedrive API & Integration Console](tools/pipedrive_integration_engine/README.md) | `/pipedrive-integration-engine` | Direct webhook dispatch without Zapier, Sinch AI SMS threading with sales rep handover, opt out synchronizer and a Power BI incremental sync ledger |
 | [EHR Cloud Security & WIF Architecture Console](tools/cloud_security_wif_console/README.md) | `/cloud-security-wif-console` | Azure to GCP Workload Identity Federation simulator, GCS Credential Access Boundary evaluator, Key Vault versus Managed Identity matrix and the IIS static key failure mode inspector |
+| [Multi Channel Inventory Sync Engine](tools/multi_channel_inventory_sync/README.md) | `/multi-channel-inventory-sync` | Cross platform SKU mapping, stock deduction and negative inventory prevention for Amazon, eBay and Shopify |
+| [Zero Trust Remote Access Console](tools/zero_trust_rmm_console/README.md) | `/zero-trust-rmm-console` | Multitenant RBAC simulator, MFA enforcement ledger and ad hoc session code generator |
+| [Print on Demand Automation Router](tools/pod_automation_router/README.md) | `/pod-automation-router` | WooCommerce payload routing, Printful fulfilment simulation and multi channel tracking sync |
 
 ## Adding a tool
 
@@ -61,7 +85,27 @@ http://localhost:8501/<key>.
 
 ## Tests
 
-Run from the repository root:
+One command runs everything and prints a single summary:
+
+```bash
+scripts/check.sh          # every suite, about 17 seconds
+scripts/check.sh fast     # skip the two browser suites, about 8 seconds
+```
+
+It reuses a hub on port 8600 if one is already running and starts one only if
+needed, because starting Streamlit and waiting for it to answer was a large
+part of the wall clock on earlier builds.
+
+To add a tool, generate its scaffold rather than writing the eight files by
+hand, then replace the placeholders:
+
+```bash
+python3 scripts/new_tool.py --key my-tool --title "My Tool" \
+    --tagline "What it does, in one sentence." \
+    --audience "Who it is for" --icon "🧰"
+```
+
+Individual suites, run from the repository root:
 
 ```bash
 python3 tests/test_hub.py                     # hub, registry and navigation
@@ -81,17 +125,27 @@ python3 tests/test_keep_streamlit_awake.py    # the keep awake prober
 python3 -m pytest tests/test_cloud_security_wif_console.py \
                  tests/test_cloud_security_wif_console_page.py -q
 python3 tests/test_promote_workflow.py        # the promotion workflow guarantees
+python3 tests/test_multi_channel_inventory_sync.py       # inventory engine
+python3 tests/test_multi_channel_inventory_sync_page.py  # inventory console page
+python3 tests/test_browser_inventory_flow.py             # real browser flow, needs a hub
 ```
 
 Every suite declares its pass and fail markers before running and parses results
 programmatically, so nothing is judged by eye. Clean runs print
-`HUB RESULT: PASS 56/56`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
+`HUB RESULT: PASS 222/222`, `RESULT: PASS 164/164`, `UI RESULT: PASS 38/38`,
 `PHP RESULT: PASS 30/30`, `THEME RESULT: PASS 14/14`,
 `SYNC RESULT: PASS 117/117`, `SYNC UI RESULT: PASS 28/28`,
-`PIPEDRIVE RESULT: PASS 47/47`, `PIPEDRIVE UI RESULT: PASS 24/24`,
-`KEEPALIVE UNIT RESULT: PASS 22/22`, `WIF RESULT: PASS 57/57`,
-`WIF UI RESULT: PASS 30/30` and `PROMOTE RESULT: PASS 22/22`, and each exits 0.
-Any failure prints lines beginning `FAIL` and exits 1.
+`INVENTORY RESULT: PASS 132/132`, `INVENTORY UI RESULT: PASS 52/52`,
+`BROWSER RESULT: PASS 11/11`, `PIPEDRIVE RESULT: PASS 47/47`,
+`PIPEDRIVE UI RESULT: PASS 24/24`, `KEEPALIVE UNIT RESULT: PASS 25/25`,
+`WIF RESULT: PASS 57/57`, `WIF UI RESULT: PASS 30/30` and
+`PROMOTE RESULT: PASS 22/22`, and each exits 0. Any failure prints lines
+beginning `FAIL` and exits 1.
+
+Two suites need a running hub and a browser, and skip cleanly without them:
+`test_theme.py` and `test_browser_inventory_flow.py`. AppTest re-executes the
+script directly and cannot see widget state lost across a real rerun, which is
+why the browser suite exists.
 
 `tests/test_php_syntax.py` skips cleanly when no `php` binary is present, and
 `tests/test_theme.py` skips cleanly when no hub is running or no browser is

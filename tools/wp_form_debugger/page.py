@@ -39,11 +39,10 @@ def render() -> None:
     )
 
     with st.sidebar:
-        st.subheader("Engagement")
-        site_label = st.text_input("Site or client label", value="",
-                                   placeholder="acme.com contact form",
-                                   help="Appears in the downloaded report header.")
-        st.divider()
+        # The help leads, as it does on every other tool. This page used to open
+        # with the engagement field, which pushed its instructions down the
+        # sidebar and made it the one tool where they were not the first thing
+        # you read.
         st.subheader("How to use")
         st.markdown(
             "1. **Form Audit**: paste the rendered form HTML.\n"
@@ -51,6 +50,11 @@ def render() -> None:
             "3. **SMTP Delivery Check**: validate the mail path.\n"
             "4. **Report**: download everything as one Markdown file."
         )
+        st.divider()
+        st.subheader("Engagement")
+        site_label = st.text_input("Site or client label", value="",
+                                   placeholder="acme.com contact form",
+                                   help="Appears in the downloaded report header.")
         st.divider()
         st.caption(
             "Copy rendered markup, not page source: right click the form, "

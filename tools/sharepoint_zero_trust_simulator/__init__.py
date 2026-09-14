@@ -1,0 +1,1 @@
+"""Secure SharePoint Architecture Console."""

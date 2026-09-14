@@ -11,6 +11,7 @@ Fail marker: any line starting "FAIL", plus exit code 1.
 from __future__ import annotations
 
 import re
+import html
 import sys
 from pathlib import Path
 
@@ -18,7 +19,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from streamlit.testing.v1 import AppTest  # noqa: E402
 
-from shared.theme import esc  # noqa: E402
 from tools.registry import Tool, all_tools  # noqa: E402
 
 failures: list[str] = []
@@ -59,8 +59,22 @@ tools = all_tools()
 expect(len(tools) >= 1, f"registry publishes at least one tool (got {len(tools)})")
 keys = [t.key for t in tools]
 expect(len(keys) == len(set(keys)), f"tool keys are unique (got {keys})")
+def shown(title: str, body: str) -> bool:
+    """A title reaches the page either literally or HTML escaped.
+
+    `esc()` turns an ampersand into &amp; on its way into a card, which is
+    correct and which a raw substring search misses. This accepts both rather
+    than pushing the escaping out of the app to satisfy a test.
+    """
+    return title in body or html.escape(title) in body
+
+
 titles = [t.title for t in tools]
 expect(len(titles) == len(set(titles)), f"tool titles are unique (got {titles})")
+icons = [t.icon for t in tools]
+expect(len(icons) == len(set(icons)),
+       f"tool icons are unique, since the landing page and the navigation are "
+       f"read by icon as much as by name (got {icons})")
 for t in tools:
     expect(isinstance(t, Tool), f"{t.key} is a Tool instance")
     expect(bool(re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", t.key)),
@@ -87,10 +101,7 @@ expect(not at.exception, f"hub runs clean (got {[str(e.value) for e in at.except
 body = text_of(at)
 expect("Toolbench" in body, "hub name renders")
 for t in tools:
-    # A title carrying an HTML special character reaches the card escaped,
-    # which is the correct rendering, so either form counts as present.
-    expect(t.title in body or esc(t.title) in body,
-           f"landing page lists {t.title}")
+    expect(shown(t.title, body), f"landing page lists {t.title}")
     expect(t.tagline[:40] in body, f"landing page shows the {t.key} tagline")
 expect(f"{len(tools)} tool" in body, "landing page states how many tools are available")
 
@@ -98,7 +109,7 @@ print("== Navigation covers home plus every tool ==")
 expect(len(at.sidebar) > 0, "sidebar renders")
 nav_labels = {str(getattr(el, "label", "")) for el in at.get("page_link")}
 for t in tools:
-    expect(any(t.title in label for label in nav_labels),
+    expect(any(shown(t.title, label) for label in nav_labels),
            f"a page link exists for {t.title} (got {nav_labels})")
 
 print("== Adding a tool needs only a registry entry ==")
@@ -107,7 +118,7 @@ expect("all_tools()" in entry_src, "hub builds its pages from the registry")
 for t in tools:
     expect(t.key not in entry_src,
            f"hub does not hardcode the tool key {t.key}")
-    expect(t.title not in entry_src,
+    expect(not shown(t.title, entry_src),
            f"hub does not hardcode the tool title {t.title}")
 
 print()

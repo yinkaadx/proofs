@@ -7,6 +7,7 @@ nothing else needs editing and no redeploy is required: a push is enough.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Callable
 
@@ -21,8 +22,49 @@ class Tool:
     render: Callable[[], None]
 
 
+def _padding() -> int:
+    """How many synthetic tools to append, for layout tests only.
+
+    The sidebar once hid each tool's instructions behind a list that grew by a
+    row every week. A test that measures sixteen tools would have passed every
+    week until the week it did not, so the guard has to prove the layout is
+    independent of the count rather than acceptable at today's count. This hook
+    is how it grows the list to forty without inventing forty tools.
+    """
+    raw = os.environ.get("TOOLBENCH_PAD_TOOLS", "")
+    return int(raw) if raw.isdigit() and 0 < int(raw) <= 200 else 0
+
+
+def _placeholder(title: str):
+    def render() -> None:
+        import streamlit as st
+
+        st.markdown(f"### {title}")
+        st.caption("A synthetic tool. It exists only to lengthen the tool list "
+                   "while a layout test measures whether that moves anything.")
+        with st.sidebar:
+            st.subheader("How to use")
+            st.markdown("Nothing to use. This tool is scaffolding for a test.")
+    return render
+
+
 def all_tools() -> list[Tool]:
     """Every tool published by the hub, in landing page order."""
+    from tools.multi_channel_inventory_sync.page import render as multi_channel_inventory_sync
+    from tools.aerial_insights_qa_console.page import render as aerial_insights_qa_console
+    from tools.askew_suit_engine.page import render as askew_suit_engine
+    from tools.hubspot_b2b_network_architect.page import render as hubspot_b2b_network_architect
+    from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
+    from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
+    from tools.pod_automation_router.page import render as pod_automation_router
+    from tools.wastetab_dispatch_engine.page import render as wastetab_dispatch_engine
+    from tools.reventure_conversion_engine.page import render as reventure_conversion_engine
+    from tools.ten_dlc_compliance_validator.page import render as ten_dlc_compliance_validator
+    from tools.web3_smart_escrow_console.page import render as web3_smart_escrow_console
+    from tools.retreat_funnel_redundancy_guard.page import render as retreat_funnel_redundancy_guard
+    from tools.sharepoint_zero_trust_simulator.page import render as sharepoint_zero_trust_simulator
+    from tools.tv_mt5_bridge_diagnostic.page import render as tv_mt5_bridge_diagnostic
+    from tools.zero_trust_rmm_console.page import render as zero_trust_rmm_console
     from tools.cloud_security_wif_console.page import render as cloud_security_wif_console
     from tools.netsuite_hubspot_sync.page import render as netsuite_hubspot_sync
     from tools.pipedrive_integration_engine.page import render as pipedrive_integration_engine
@@ -55,7 +97,7 @@ def all_tools() -> list[Tool]:
         Tool(
             key="pipedrive-integration-engine",
             title="Pipedrive API & Integration Console",
-            icon="📲",
+            icon="\U0001F514",
             tagline=(
                 "Direct webhook dispatch without Zapier, Sinch AI SMS "
                 "threading, and Power BI incremental sync ledger."
@@ -66,7 +108,7 @@ def all_tools() -> list[Tool]:
         Tool(
             key="cloud-security-wif-console",
             title="EHR Cloud Security & WIF Architecture Console",
-            icon="🔐",
+            icon="\U0001F511",
             tagline=(
                 "Azure to GCP Workload Identity Federation simulator, GCS "
                 "Credential Access Boundary evaluator, and Key Vault policy "
@@ -75,4 +117,179 @@ def all_tools() -> list[Tool]:
             audience="Security architecture",
             render=cloud_security_wif_console,
         ),
+        Tool(
+            key="multi-channel-inventory-sync",
+            title="Multi Channel Inventory Sync Engine",
+            icon="\U0001F4E6",
+            tagline=(
+                "Cross platform SKU mapping, automated stock deduction, and "
+                "negative inventory prevention for Amazon, eBay, and Shopify."
+            ),
+            audience="Ecommerce operations",
+            render=multi_channel_inventory_sync,
+        ),
+        Tool(
+            key="zero-trust-rmm-console",
+            title="Zero Trust Remote Access Console",
+            icon="\U0001F510",
+            tagline=(
+                "Multitenant RBAC simulator, MFA enforcement ledger, and Ad hoc "
+                "session code generator."
+            ),
+            audience="Managed IT services",
+            render=zero_trust_rmm_console,
+        ),
+        Tool(
+            key="pod-automation-router",
+            title="Print on Demand Automation Router",
+            icon="\U0001F5A8",
+            tagline=(
+                "WooCommerce order payload routing, Printful API fulfillment "
+                "simulation, and multi channel tracking synchronization."
+            ),
+            audience="Ecommerce operations",
+            render=pod_automation_router,
+        ),
+        Tool(
+            key="tv-mt5-bridge-diagnostic",
+            title="TradingView MT5 Bridge Diagnostic Console",
+            icon="\u23F1",
+            tagline=(
+                "Webhook payload inspector, latency analyzer, and execution "
+                "drift monitor for TradingView to MT5 synchronization."
+            ),
+            audience="Algorithmic trading",
+            render=tv_mt5_bridge_diagnostic,
+        ),
+        Tool(
+            key="sharepoint-zero-trust-simulator",
+            title="Secure SharePoint Architecture Console",
+            icon="\U0001F6E1",
+            tagline=(
+                "Entra ID authentication simulator, role based access matrix, "
+                "and secure deployment checklist."
+            ),
+            audience="Microsoft 365 security",
+            render=sharepoint_zero_trust_simulator,
+        ),
+        Tool(
+            key="retreat-funnel-redundancy-guard",
+            title="Retreat Funnel Redundancy Guard",
+            icon="\U0001F33F",
+            tagline=(
+                "FG Funnels webhook simulator, automated Slack alert routing, "
+                "and webinar metrics tracking."
+            ),
+            audience="Coaching and retreat marketing",
+            render=retreat_funnel_redundancy_guard,
+        ),
+        Tool(
+            key="web3-smart-escrow-console",
+            title="Web3 SmartEscrow Architecture Console",
+            icon="\u26D3",
+            tagline=(
+                "EVM SmartEscrow deployment simulator, Foundry fuzzing ledger, "
+                "and event indexing stream."
+            ),
+            audience="Blockchain engineering",
+            render=web3_smart_escrow_console,
+        ),
+        Tool(
+            key="ten-dlc-compliance-validator",
+            title="10DLC Campaign Registry Compliance Validator",
+            icon="\U0001F4F2",
+            tagline=(
+                "A2P 10DLC brand and campaign registration simulator ensuring "
+                "exact TCR approval standards."
+            ),
+            audience="SMS compliance",
+            render=ten_dlc_compliance_validator,
+        ),
+        Tool(
+            key="reventure-conversion-engine",
+            title="Mobile Conversion & Release Engine",
+            icon="\U0001F4F1",
+            tagline=(
+                "Feature flag A/B test controller, App Store rating logic, and "
+                "Stripe subscription webhook pipeline."
+            ),
+            audience="Mobile product engineering",
+            render=reventure_conversion_engine,
+        ),
+        Tool(
+            key="airtable-whatsapp-automation-guard",
+            title="Airtable WhatsApp Automation Guard",
+            icon="\U0001F4AC",
+            tagline=(
+                "Idempotent Make webhook simulator, Twilio payload router, "
+                "and error handling guard."
+            ),
+            audience="Automation and operations",
+            render=airtable_whatsapp_automation_guard,
+        ),
+        Tool(
+            key="m365-intranet-architecture-console",
+            title="Microsoft 365 Intranet Architecture Console",
+            icon="\U0001F3E2",
+            tagline=(
+                "SharePoint role simulator, Power Apps PTO and timesheet "
+                "logic, and Claude AI project insights."
+            ),
+            audience="Microsoft 365 consulting",
+            render=m365_intranet_architecture_console,
+        ),
+        Tool(
+            key="wastetab-dispatch-engine",
+            title="WasteTab Logistics & Financial Engine",
+            icon="\U0001F69B",
+            tagline=(
+                "Regional dispatch routing, GoDaddy gross up fee calculator, "
+                "and emergency safety valve simulator."
+            ),
+            audience="Waste logistics operations",
+            render=wastetab_dispatch_engine,
+        ),
+        Tool(
+            key="aerial-insights-qa-console",
+            title="Aerial Insights QA & Production Console",
+            icon="\U0001F6F0",
+            tagline=(
+                "Background worker diagnostics, Prisma connection pooling "
+                "auditor, and Stripe idempotency ledger."
+            ),
+            audience="Platform engineering",
+            render=aerial_insights_qa_console,
+        ),
+        Tool(
+            key="askew-suit-engine",
+            title="ASKEW Bespoke Pricing Engine",
+            icon="\U0001F9F5",
+            tagline=(
+                "Visual base plus upgrade configurator, fifty percent split "
+                "deposit logic, and customer measurement database simulator."
+            ),
+            audience="Bespoke tailoring",
+            render=askew_suit_engine,
+        ),
+        Tool(
+            key="hubspot-b2b-network-architect",
+            title="HubSpot B2B Network Architect",
+            icon="\U0001F578",
+            tagline=(
+                "Gridwise entity relationship model, network categorization "
+                "logic, and LinkedIn deduplication ledger."
+            ),
+            audience="RevOps and CRM architecture",
+            render=hubspot_b2b_network_architect,
+        ),
+    ] + [
+        Tool(
+            key=f"synthetic-{index:02d}",
+            title=f"Synthetic Tool {index:02d}",
+            icon="\u2699",
+            tagline="Scaffolding for a layout test, not a real tool.",
+            audience="Tests",
+            render=_placeholder(f"Synthetic Tool {index:02d}"),
+        )
+        for index in range(1, _padding() + 1)
     ]
