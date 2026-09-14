@@ -21,6 +21,7 @@ LOG="${TMPDIR:-/tmp}/toolbench-hub-${PORT}.log"
 
 UNIT_SUITES=(
   tests/test_hub.py
+  tests/test_canonical_url.py
   tests/test_wp_form_debugger_core.py
   tests/test_app_smoke.py
   tests/test_php_syntax.py

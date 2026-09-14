@@ -20,11 +20,29 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.build_info import short_commit  # noqa: E402
 from tools.registry import all_tools  # noqa: E402
 
-DEFAULT_BASE = "https://proofs-toolbench.streamlit.app"
+# The one place the live hostname is written down is the app list the keep
+# awake workflow reads. Everything else derives from it. A second copy here
+# would be a second thing to keep in step, and a hostname typed from memory is
+# exactly how a dead link was handed over once already.
+APP_LIST = Path(__file__).resolve().parents[1] / ".github" / "streamlit-apps.txt"
+
+
+def canonical_base(app_list: Path = APP_LIST) -> str:
+    """The live app URL, read from .github/streamlit-apps.txt.
+
+    That file is the list the keep awake workflow actually opens in a browser,
+    so a URL taken from it is one that something has proved reachable, rather
+    than one somebody believed.
+    """
+    for line in app_list.read_text().splitlines():
+        entry = line.split("#", 1)[0].strip()
+        if entry:
+            return entry.rstrip("/")
+    raise SystemExit(f"no app URL found in {app_list}")
 
 
 def main() -> int:
-    base = (sys.argv[1] if len(sys.argv) > 1 else DEFAULT_BASE).rstrip("/")
+    base = (sys.argv[1] if len(sys.argv) > 1 else canonical_base()).rstrip("/")
     tools = all_tools()
     print(f"Toolbench, {len(tools)} tool(s), checkout at build {short_commit()}")
     print(f"Home  {base}/")
