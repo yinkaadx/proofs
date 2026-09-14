@@ -71,6 +71,15 @@ MAIN_SELECTOR = '[data-testid="stMain"]'
 NAV_TIMEOUT_MS = 90_000
 RESOLVE_TIMEOUT_MS = 90_000
 WAKE_TIMEOUT_MS = 300_000
+# Community Cloud renders the app inside a frame served under /~/+/, and that
+# frame does not exist yet when navigation resolves. Querying the outer shell
+# for an app selector therefore waits out the full clock and finds nothing, so
+# the frame is waited for separately and briefly.
+FRAME_TIMEOUT_MS = 30_000
+# A per tool budget, well under the resolve timeout. The first live run spent
+# 90 seconds on each of seventeen tools and took 27 minutes to report a result
+# that was wrong anyway.
+TOOL_TIMEOUT_MS = 45_000
 # Long enough for the session to register as a real visit rather than a bounce.
 DWELL_MS = 12_000
 
@@ -87,6 +96,9 @@ class AppResult:
     awake: bool = False
     health: str = ""
     missing_tools: list[str] = field(default_factory=list)
+    # Tools the prober could not read at all. Reported, never fatal: a failed
+    # lookup is not evidence that a tool is absent from the live app.
+    unchecked_tools: list[str] = field(default_factory=list)
     error: str = ""
 
     @property
@@ -179,6 +191,12 @@ def verdict(results: list[AppResult]) -> tuple[int, list[str]]:
         if result.ok:
             state = "woken from sleep" if result.was_asleep else "already awake"
             lines.append(f"  ok   {result.url} {state}")
+            if result.unchecked_tools:
+                lines.append(f"       note: could not read "
+                             f"{len(result.unchecked_tools)} tool page(s): "
+                             f"{', '.join(result.unchecked_tools)}. Not counted "
+                             f"as missing, because a failed read is not "
+                             f"evidence of a stale deploy.")
         else:
             if result.error:
                 reason = result.error
@@ -283,42 +301,82 @@ def visit(page, app_url: str, shots: Path | None, label: str) -> AppResult:
     return result
 
 
-def read_main(page, settle_ms: int = 3_500) -> str:
+def wait_for_app_frame(page, timeout_ms: int = FRAME_TIMEOUT_MS):
+    """Wait until the frame the app renders into exists, then return it.
+
+    On Community Cloud the app lives in a frame under /~/+/ that is created
+    after navigation resolves. Looking it up immediately falls back to the
+    outer shell, where no app selector will ever appear, so every query then
+    burns its whole timeout and reports a tool as missing when the only thing
+    that failed was the lookup. Locally there is no frame at all and the page
+    itself is the right answer, which is why the fallback stays.
+    """
+    waited = 0
+    step = 500
+    while waited < timeout_ms:
+        for frame in page.frames:
+            if APP_FRAME_PATH in frame.url:
+                return frame
+        # Running against a local hub there is no frame and never will be, so
+        # the page itself is the answer the moment it has painted. Without this
+        # the local path would sit out the whole frame timeout on every page.
+        try:
+            if page.query_selector(AWAKE_SELECTOR) is not None:
+                return page
+        except Exception:                         # noqa: BLE001
+            pass
+        page.wait_for_timeout(step)
+        waited += step
+    return page
+
+
+def read_main(page, settle_ms: int = 3_500, timeout_ms: int = RESOLVE_TIMEOUT_MS) -> str:
     """Text of the main column, once it has actually painted something.
 
     Waiting for the app shell is not enough: the shell exists well before
     Streamlit has drawn the page into it, and reading too early reports an
     empty column as a missing tool.
     """
-    frame = _app_frame(page)
-    frame.wait_for_selector(AWAKE_SELECTOR, timeout=RESOLVE_TIMEOUT_MS)
-    frame.wait_for_selector(MAIN_SELECTOR, timeout=RESOLVE_TIMEOUT_MS)
+    frame = wait_for_app_frame(page)
+    frame.wait_for_selector(AWAKE_SELECTOR, timeout=timeout_ms)
+    frame.wait_for_selector(MAIN_SELECTOR, timeout=timeout_ms)
     page.wait_for_timeout(settle_ms)
     return frame.inner_text(MAIN_SELECTOR, timeout=30_000)
 
 
 def verify_tools(page, app_url: str, tools: list[tuple[str, str]],
-                 home_fingerprint: str) -> list[str]:
+                 home_fingerprint: str) -> tuple[list[str], list[str]]:
     """Confirm every registered tool is actually reachable on the live app.
 
     This is what catches a deploy that never picked up the newest push. A tool
     that exists in the repository but not on the live app means the running
     instance is stale, and saying so loudly beats finding out by hand.
+
+    Two outcomes, kept apart on purpose. A tool is MISSING only when the page
+    actually rendered and what rendered was the landing page, which is positive
+    evidence that the running app has never heard of it. A tool that could not
+    be read at all is UNCHECKED, not missing: a timeout says the prober failed
+    to look, not that the tool is absent, and the first live run proved how
+    badly that conflation reads by declaring all seventeen tools missing from
+    an app that was serving every one of them.
     """
     missing: list[str] = []
+    unchecked: list[str] = []
     for key, _title in tools:
         url = tool_url(app_url, key)
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
-            main = read_main(page)
+            main = read_main(page, timeout_ms=TOOL_TIMEOUT_MS)
         except Exception as exc:                  # noqa: BLE001
-            missing.append(f"{key} ({type(exc).__name__})")
+            unchecked.append(f"{key} ({type(exc).__name__})")
+            print(f"  ?    {url} could not be read: {type(exc).__name__}")
             continue
         if tool_is_live(main, home_fingerprint):
             print(f"  ok   {url}")
         else:
             missing.append(f"{key} (the live app fell back to the landing page)")
-    return missing
+            print(f"  FAIL {url} served the landing page, so the deploy is stale")
+    return missing, unchecked
 
 
 def chromium_executable(explicit: str = "") -> str | None:
@@ -364,8 +422,8 @@ def run(apps: list[str], tools: list[tuple[str, str]],
                     result.error = f"could not read the landing page: {type(exc).__name__}"
                     results.append(result)
                     continue
-                result.missing_tools = verify_tools(page, app, tools,
-                                                    home_fingerprint)
+                result.missing_tools, result.unchecked_tools = verify_tools(
+                    page, app, tools, home_fingerprint)
             results.append(result)
             print(f"  .    health endpoint says: {result.health}")
         context.close()
@@ -411,7 +469,7 @@ def main(argv: list[str] | None = None) -> int:
         "apps": [
             {"url": r.url, "was_asleep": r.was_asleep, "awake": r.awake,
              "health": r.health, "missing_tools": r.missing_tools,
-             "error": r.error}
+             "unchecked_tools": r.unchecked_tools, "error": r.error}
             for r in results
         ]
     }

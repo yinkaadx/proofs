@@ -209,6 +209,49 @@ def test_a_stale_deploy_fails_and_names_the_missing_tools():
     assert "pipedrive-integration-engine" in lines[0]
 
 
+def test_a_tool_that_could_not_be_read_is_not_called_missing():
+    # The first live run declared all seventeen tools missing from an app that
+    # was serving every one of them, because a lookup timeout was recorded the
+    # same way as a landing page fallback. A failed read means the prober did
+    # not look, which is not evidence about the deploy at all.
+    result = ka.AppResult(url="https://x.streamlit.app", reachable=True,
+                          awake=True, health="ok",
+                          unchecked_tools=["wp-form-debugger (TimeoutError)"])
+    assert result.ok is True, "an unreadable tool page must not fail the run"
+    code, lines = ka.verdict([result])
+    assert code == 0
+    body = "\n".join(lines)
+    assert "could not read" in body, "the unread tool is not reported at all"
+    assert "wp-form-debugger" in body
+    assert lines[-1] == "KEEPALIVE RESULT: PASS 1/1 apps awake"
+
+
+def test_a_proved_stale_deploy_still_fails():
+    # The distinction only earns its keep if the positive case still fails.
+    result = ka.AppResult(url="https://x.streamlit.app", reachable=True,
+                          awake=True, health="ok",
+                          missing_tools=["new-tool (the live app fell back to "
+                                         "the landing page)"],
+                          unchecked_tools=["other-tool (TimeoutError)"])
+    assert result.ok is False
+    code, _ = ka.verdict([result])
+    assert code == 1
+
+
+def test_the_prober_waits_for_the_app_frame_before_querying_it():
+    # Community Cloud creates the app frame after navigation resolves. Looking
+    # it up immediately falls back to the outer shell, where no app selector
+    # ever appears, so every query burns its whole timeout for nothing.
+    source = (ROOT / "scripts" / "keep_streamlit_awake.py").read_text()
+    assert "def wait_for_app_frame(" in source
+    assert "frame = wait_for_app_frame(page)" in source, (
+        "read_main does not wait for the app frame")
+    # And the per tool budget must be well under the resolve timeout, or one
+    # bad run costs half an hour.
+    assert ka.TOOL_TIMEOUT_MS < ka.RESOLVE_TIMEOUT_MS
+    assert ka.FRAME_TIMEOUT_MS <= ka.TOOL_TIMEOUT_MS
+
+
 def test_one_bad_app_among_several_fails_the_whole_run():
     good = ka.AppResult(url="https://a.streamlit.app", reachable=True,
                         awake=True, health="ok")
