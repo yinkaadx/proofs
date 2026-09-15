@@ -58,6 +58,7 @@ def all_tools() -> list[Tool]:
     from tools.hipaa_tracking_audit_console.page import render as hipaa_tracking_audit_console
     from tools.mobile_qa_bug_bash_console.page import render as mobile_qa_bug_bash_console
     from tools.creator_membership_architecture_console.page import render as creator_membership_architecture_console
+    from tools.cloudflare_r2_transfer_optimizer.page import render as cloudflare_r2_transfer_optimizer
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -331,6 +332,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Paid publications and creators",
             render=creator_membership_architecture_console,
+        ),
+        Tool(
+            key="cloudflare-r2-transfer-optimizer",
+            title="Cloudflare R2 Transfer Optimization Console",
+            icon="\U00002601",
+            tagline=(
+                "Cloudflare R2 presigned URL transfer simulator, multipart "
+                "throughput calculator, and edge latency analyzer."
+            ),
+            audience="Storage and platform engineering",
+            render=cloudflare_r2_transfer_optimizer,
         ),
     ] + [
         Tool(
