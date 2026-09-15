@@ -54,6 +54,7 @@ def all_tools() -> list[Tool]:
     from tools.aerial_insights_qa_console.page import render as aerial_insights_qa_console
     from tools.askew_suit_engine.page import render as askew_suit_engine
     from tools.hubspot_b2b_network_architect.page import render as hubspot_b2b_network_architect
+    from tools.enterprise_ai_pipeline_console.page import render as enterprise_ai_pipeline_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -281,6 +282,18 @@ def all_tools() -> list[Tool]:
             ),
             audience="RevOps and CRM architecture",
             render=hubspot_b2b_network_architect,
+        ),
+        Tool(
+            key="enterprise-ai-pipeline-console",
+            title="Enterprise AI Pipeline Console",
+            icon="\U0001F9E0",
+            tagline=(
+                "Intelligent document processing simulator, LLM schema "
+                "extractor, background queue worker, and PostgreSQL query "
+                "optimizer."
+            ),
+            audience="AI platform engineering",
+            render=enterprise_ai_pipeline_console,
         ),
     ] + [
         Tool(
