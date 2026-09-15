@@ -57,6 +57,7 @@ def all_tools() -> list[Tool]:
     from tools.enterprise_ai_pipeline_console.page import render as enterprise_ai_pipeline_console
     from tools.hipaa_tracking_audit_console.page import render as hipaa_tracking_audit_console
     from tools.mobile_qa_bug_bash_console.page import render as mobile_qa_bug_bash_console
+    from tools.creator_membership_architecture_console.page import render as creator_membership_architecture_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -319,6 +320,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Mobile QA and release",
             render=mobile_qa_bug_bash_console,
+        ),
+        Tool(
+            key="creator-membership-architecture-console",
+            title="Premium Creator Membership Console",
+            icon="\U0001F399",
+            tagline=(
+                "Editorial paywall preview simulator, audio and podcast "
+                "player feed, member tier gating, and Stripe webhook handler."
+            ),
+            audience="Paid publications and creators",
+            render=creator_membership_architecture_console,
         ),
     ] + [
         Tool(
