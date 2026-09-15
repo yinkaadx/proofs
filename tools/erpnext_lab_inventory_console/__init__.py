@@ -1,0 +1,1 @@
+"""ERPNext Laboratory & Equipment Console."""

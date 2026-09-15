@@ -59,6 +59,7 @@ def all_tools() -> list[Tool]:
     from tools.mobile_qa_bug_bash_console.page import render as mobile_qa_bug_bash_console
     from tools.creator_membership_architecture_console.page import render as creator_membership_architecture_console
     from tools.cloudflare_r2_transfer_optimizer.page import render as cloudflare_r2_transfer_optimizer
+    from tools.erpnext_lab_inventory_console.page import render as erpnext_lab_inventory_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -343,6 +344,18 @@ def all_tools() -> list[Tool]:
             ),
             audience="Storage and platform engineering",
             render=cloudflare_r2_transfer_optimizer,
+        ),
+        Tool(
+            key="erpnext-lab-inventory-console",
+            title="ERPNext Laboratory & Equipment Console",
+            icon="\U00002697",
+            tagline=(
+                "Cloudflare Tunnel ingress simulator, ERPNext Frappe DocType "
+                "schema linker for equipment and chemical SDS, and automated "
+                "backup matrix."
+            ),
+            audience="Laboratory operations and ERP",
+            render=erpnext_lab_inventory_console,
         ),
     ] + [
         Tool(
