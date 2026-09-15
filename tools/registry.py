@@ -55,6 +55,7 @@ def all_tools() -> list[Tool]:
     from tools.askew_suit_engine.page import render as askew_suit_engine
     from tools.hubspot_b2b_network_architect.page import render as hubspot_b2b_network_architect
     from tools.enterprise_ai_pipeline_console.page import render as enterprise_ai_pipeline_console
+    from tools.hipaa_tracking_audit_console.page import render as hipaa_tracking_audit_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -294,6 +295,18 @@ def all_tools() -> list[Tool]:
             ),
             audience="AI platform engineering",
             render=enterprise_ai_pipeline_console,
+        ),
+        Tool(
+            key="hipaa-tracking-audit-console",
+            title="HIPAA Web & Tracking Audit Console",
+            icon="\U0001FA7A",
+            tagline=(
+                "OCR tracking guidance auditor, Google Tag Manager PHI leak "
+                "detector, SimplePractice pre fill risk analyzer, and BAA "
+                "matrix."
+            ),
+            audience="Behavioural health practices",
+            render=hipaa_tracking_audit_console,
         ),
     ] + [
         Tool(
