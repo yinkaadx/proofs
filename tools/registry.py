@@ -62,6 +62,7 @@ def all_tools() -> list[Tool]:
     from tools.erpnext_lab_inventory_console.page import render as erpnext_lab_inventory_console
     from tools.supply_chain_qa_console.page import render as supply_chain_qa_console
     from tools.sports_betting_algo_console.page import render as sports_betting_algo_console
+    from tools.megaport_bgp_rtbh_console.page import render as megaport_bgp_rtbh_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -381,6 +382,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Quantitative modelling",
             render=sports_betting_algo_console,
+        ),
+        Tool(
+            key="megaport-bgp-rtbh-console",
+            title="Megaport BGP RTBH & Blackhole Console",
+            icon="\U0001F573",
+            tagline=(
+                "Cisco BGP route map generator for Megaport RTBH community "
+                "tagging, /32 prefix validator, and traffic drop simulator."
+            ),
+            audience="Network operations",
+            render=megaport_bgp_rtbh_console,
         ),
     ] + [
         Tool(
