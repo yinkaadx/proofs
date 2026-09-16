@@ -17,7 +17,9 @@ Fail marker: any line starting "FAIL", plus exit code 1.
 
 from __future__ import annotations
 
+import json
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -153,6 +155,23 @@ def test_an_empty_main_column_is_never_counted_as_live():
     home = ka.fingerprint("Toolbench")
     assert ka.tool_is_live("", home) is False
     assert ka.tool_is_live("   \n  ", home) is False
+
+
+def test_an_empty_main_column_is_unchecked_not_missing(monkeypatch):
+    """Nothing painted in time is the prober's failure. Counting it as the
+    landing page made one slow paint on a quiet branch positive staleness,
+    which past the grace is a failure every three hours."""
+    page = _FakePage([{"a", "b", "c"}], empty={"b"})
+    results = _drive(monkeypatch, page)
+    result = results[0]
+    assert result.missing_tools == []
+    assert result.unchecked_tools == ["b (empty main column)"]
+    assert result.deploy_status == "UNPROVEN"
+    result.stale_for = 96 * 3600
+    assert not ka.past_grace(result, 3 * 3600)
+    code, _ = ka.verdict(results, stale_is_failure=False,
+                         stale_grace_seconds=3 * 3600)
+    assert code == 0
 
 
 def test_the_checker_reads_the_main_column_not_the_whole_body():
@@ -486,14 +505,69 @@ def test_an_unproven_deploy_is_also_a_warning_in_warning_mode():
     assert "UNPROVEN" in "\n".join(lines)
 
 
-def test_warning_mode_has_no_age_based_escalation():
-    """One was tried. Measured from the deploy head's commit time, it turned a
-    single flaky read on a quiet branch back into a failure every three hours,
-    which is the original complaint. verdict() takes no age and no grace."""
-    import inspect
-    params = inspect.signature(ka.verdict).parameters
-    assert set(params) == {"results", "stale_is_failure"}
-    assert not hasattr(ka.AppResult(url=APP), "stale_for")
+def test_a_positively_stale_deploy_past_the_grace_fails_in_warning_mode():
+    """The one deploy condition worth an email: stuck. Community Cloud has
+    applied every push here within about two hours on its own, so a change
+    still unapplied past three is not going to fix itself."""
+    stuck = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, missing_tools=["x (landing page)"],
+                         stale_for=4 * 3600)
+    assert ka.past_grace(stuck, 3 * 3600)
+    code, lines = ka.verdict([stuck], stale_is_failure=False,
+                             stale_grace_seconds=3 * 3600)
+    assert code == 1
+    assert "past the 3 hour grace" in lines[0]
+    assert "4.0 hours" in lines[0]
+    assert "Reboot" in lines[0]
+
+
+def test_a_build_mismatch_past_the_grace_also_counts_as_stuck():
+    stuck = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, live_build="c06bbb6",
+                         expected_build="8ef505e" + "0" * 33, stale_for=4 * 3600)
+    assert stuck.deploy_status == "STALE"
+    assert ka.past_grace(stuck, 3 * 3600)
+
+
+def test_an_unproven_deploy_never_escalates_however_old():
+    """The first draft escalated on this, and one flaky read on a quiet
+    branch brought the every three hours email straight back."""
+    flaky = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, unchecked_tools=["a (TimeoutError)"],
+                         stale_for=30 * 24 * 3600)
+    assert flaky.deploy_status == "UNPROVEN"
+    assert not ka.past_grace(flaky, 3 * 3600)
+    code, lines = ka.verdict([flaky], stale_is_failure=False,
+                             stale_grace_seconds=3 * 3600)
+    assert code == 0
+    assert lines[0].strip().startswith("WARN ")
+
+
+def test_a_stale_deploy_within_the_grace_stays_a_warning():
+    young = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, missing_tools=["x (landing page)"],
+                         stale_for=90 * 60)
+    assert not ka.past_grace(young, 3 * 3600)
+    code, lines = ka.verdict([young], stale_is_failure=False,
+                             stale_grace_seconds=3 * 3600)
+    assert code == 0
+    assert lines[0].strip().startswith("WARN ")
+
+
+def test_the_grace_needs_an_age_and_a_grace_to_act_on():
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, missing_tools=["x (landing page)"])
+    assert not ka.past_grace(stale, 1)                      # no age known
+    stale.stale_for = 10 ** 6
+    assert not ka.past_grace(stale, None)                   # no grace set
+    assert ka.verdict([stale], stale_is_failure=False)[0] == 0
+
+
+def test_the_grace_never_touches_strict_mode_or_a_current_deploy():
+    clean = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, stale_for=10 ** 6)
+    assert not ka.past_grace(clean, 1)
+    assert ka.verdict([clean], stale_grace_seconds=1)[0] == 0
 
 
 def test_a_current_deploy_passes_identically_in_both_modes():
@@ -693,7 +767,7 @@ class _FakePage:
     """
 
     def __init__(self, live_by_look, build="abc1234", timeouts_by_look=None,
-                 build_by_look=None):
+                 build_by_look=None, empty=(), read_cost=0.0):
         self.live_by_look = live_by_look
         self.timeouts_by_look = timeouts_by_look or {}
         self.build_by_look = build_by_look
@@ -702,6 +776,11 @@ class _FakePage:
         self.visited: list[str] = []
         self.url = ""
         self.frames: list = []
+        # Tool keys whose main column paints nothing.
+        self.empty = set(empty)
+        # Seconds every tool read costs on the fake clock, set by _drive.
+        self.read_cost = read_cost
+        self.tick = lambda seconds: None
 
     def _live(self):
         return self.live_by_look[min(self.look, len(self.live_by_look) - 1)]
@@ -737,6 +816,9 @@ class _FakePage:
                 build = self.build_by_look[min(self.look, len(self.build_by_look) - 1)]
             return f"Toolbench\nbuild {build}"
         key = self.url.rsplit("/", 1)[-1]
+        self.tick(self.read_cost)
+        if key in self.empty:
+            return "   \n  "
         if key in self._live():
             return f"{key} page content that differs from home"
         return "Toolbench home landing page"
@@ -791,7 +873,134 @@ def _drive(monkeypatch, page, tools=(("a", "A"), ("b", "B"), ("c", "C")), **kwar
         ticks["t"] += seconds
         page.look += 1
 
+    def tick(seconds):
+        ticks["t"] += seconds
+
+    page.tick = tick
     return ka.run([APP], list(tools), None, "", sleep=sleep, clock=clock, **kwargs)
+
+
+def test_a_pass_stops_at_its_budget_and_leaves_the_rest_unchecked(monkeypatch):
+    page = _FakePage([{"a", "b", "c"}], read_cost=100)
+    results = _drive(monkeypatch, page, pass_budget=150)
+    result = results[0]
+    # a at t=0, b at t=100, then the budget is spent before c.
+    assert result.missing_tools == []
+    assert result.unchecked_tools == ["c (pass budget of 150s spent)"]
+    assert result.deploy_status == "UNPROVEN"
+    result.stale_for = 96 * 3600
+    assert not ka.past_grace(result, 3 * 3600)
+
+
+def test_no_budget_means_every_tool_is_read(monkeypatch):
+    page = _FakePage([{"a", "b", "c"}], read_cost=100)
+    results = _drive(monkeypatch, page)
+    assert results[0].unchecked_tools == []
+    assert results[0].deploy_status == "CURRENT"
+
+
+def test_a_label_on_no_known_commit_is_unproven_not_stale(monkeypatch):
+    """Community Cloud can be running a merge it made on its own side, or a
+    detached checkout. That label is on no branch and proves nothing about
+    whether the code is old. Counting it as proof failed every scheduled run
+    until a Reboot."""
+    page = _FakePage([{"a", "b", "c"}], build="abcdef0")
+    results = _drive(monkeypatch, page, expect_build="1" * 40,
+                     known_builds=("1" * 40, "2" * 40, "0ad0000" + "0" * 33))
+    result = results[0]
+    assert not result.build_mismatch
+    assert result.build_unrecognised
+    assert result.deploy_status == "UNPROVEN"
+    result.stale_for = 96 * 3600
+    assert not ka.past_grace(result, 3 * 3600)
+    code, lines = ka.verdict(results, stale_is_failure=False,
+                             stale_grace_seconds=3 * 3600)
+    assert code == 0
+    assert "neither the deploy branch head" in lines[0]
+
+
+def test_a_label_on_a_known_older_commit_is_still_stale(monkeypatch):
+    page = _FakePage([{"a", "b", "c"}], build="0ad0000")
+    results = _drive(monkeypatch, page, expect_build="1" * 40,
+                     known_builds=("1" * 40, "0ad0000" + "0" * 33))
+    result = results[0]
+    assert result.build_mismatch
+    assert not result.build_unrecognised
+    assert result.deploy_status == "STALE"
+    result.stale_for = 4 * 3600
+    assert ka.past_grace(result, 3 * 3600)
+
+
+def test_without_a_history_any_other_label_is_a_mismatch():
+    """The deploy-current job has no history and needs none: a minute after
+    a push any label that is not the head means not applied yet, and that
+    job never escalates."""
+    result = ka.AppResult(url=APP, awake=True, tools_requested=3,
+                          live_build="abcdef0", expected_build="1" * 40)
+    assert result.build_mismatch
+    assert not result.build_unrecognised
+    assert result.deploy_status == "STALE"
+
+
+def test_known_builds_are_read_from_a_git_log_file(tmp_path):
+    path = tmp_path / "known.txt"
+    path.write_text("1" * 40 + "\n" + "0AD0000" + "0" * 33 + "\nnot a sha\n\n")
+    assert ka.load_known_builds(path) == ("1" * 40, "0ad0000" + "0" * 33)
+    assert ka.load_known_builds(tmp_path / "absent.txt") == ()
+
+
+def test_a_blank_age_is_unknown_not_a_usage_error():
+    assert ka._optional_float("") is None
+    assert ka._optional_float("  ") is None
+    assert ka._optional_float("1700000000") == 1700000000.0
+
+
+def _main_with(monkeypatch, tmp_path, results, argv):
+    monkeypatch.chdir(tmp_path)
+    apps = tmp_path / "apps.txt"
+    apps.write_text(APP + "\n")
+    registry = tmp_path / "registry.py"
+    registry.write_text('Tool(key="a", title="A")\n')
+    monkeypatch.setattr(ka, "run", lambda *a, **k: results)
+    code = ka.main(["--apps", str(apps), "--registry", str(registry),
+                    "--verify-tools", "--tools-as-warnings"] + argv)
+    summary = json.loads((tmp_path / "keepalive-summary.json").read_text())
+    return code, summary
+
+
+def test_the_schedule_escalates_a_stuck_deploy_end_to_end(monkeypatch, tmp_path):
+    """Through main(), not verdict(): the age must reach the results and the
+    grace must reach the verdict, or the design's whole point is untested."""
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=1, missing_tools=["a (landing page)"])
+    four_hours_ago = str(int(time.time()) - 4 * 3600)
+    code, summary = _main_with(monkeypatch, tmp_path, [stale],
+                               ["--deployed-at", four_hours_ago,
+                                "--stale-grace-seconds", "10800"])
+    assert code == 1
+    app = summary["apps"][0]
+    assert app["deploy_status"] == "STALE"
+    assert app["stale_for_seconds"] >= 4 * 3600 - 5
+
+
+def test_the_schedule_warns_inside_the_grace_end_to_end(monkeypatch, tmp_path):
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=1, missing_tools=["a (landing page)"])
+    one_hour_ago = str(int(time.time()) - 3600)
+    code, summary = _main_with(monkeypatch, tmp_path, [stale],
+                               ["--deployed-at", one_hour_ago,
+                                "--stale-grace-seconds", "10800"])
+    assert code == 0
+    assert summary["apps"][0]["deploy_status"] == "STALE"
+
+
+def test_a_blank_age_on_the_command_line_is_not_exit_2(monkeypatch, tmp_path):
+    clean = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=1)
+    code, summary = _main_with(monkeypatch, tmp_path, [clean],
+                               ["--deployed-at", "", "--stale-grace-seconds", "10800"])
+    assert code == 0
+    assert summary["apps"][0]["stale_for_seconds"] is None
 
 
 def test_a_late_deploy_is_confirmed_by_retrying(monkeypatch):
@@ -894,108 +1103,22 @@ def test_an_app_missing_every_tool_is_reported_down(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_soft_annotations_turn_fail_into_warning(capsys):
-    ka.emit_annotations(["  FAIL x stale"], soft=True)
-    assert capsys.readouterr().out.startswith("::warning::")
-    ka.emit_annotations(["  FAIL x stale"])
-    assert capsys.readouterr().out.startswith("::error::")
+def test_fail_lines_are_error_annotations_and_warn_lines_are_warnings(capsys):
+    ka.emit_annotations(["  FAIL x stale", "  WARN y slow"])
+    out = capsys.readouterr().out.splitlines()
+    assert out == ["::error::x stale", "::warning::y slow"]
+
+
+def test_the_soft_annotation_flag_went_with_its_only_caller():
+    source = (ROOT / "scripts" / "keep_streamlit_awake.py").read_text()
+    assert "soft-annotations" not in source
+    assert "soft=" not in source
 
 
 def test_nothing_is_annotated_on_a_clean_run(capsys):
     _, lines = ka.verdict([ka.AppResult(url=APP, reachable=True, awake=True, health="ok")])
     ka.emit_annotations(lines)
     assert capsys.readouterr().out == ""
-
-
-# ---------------------------------------------------------------------------
-# The deploy stamp
-# ---------------------------------------------------------------------------
-
-sys.path.insert(0, str(ROOT / "scripts"))
-import deploy_stamp as ds  # noqa: E402
-
-
-def test_the_stamp_is_the_first_line_when_absent():
-    """Humans append requirements at the bottom, so a stamp at the bottom
-    conflicted with the one push whose redeploy matters most."""
-    text, changed = ds.apply_stamp("streamlit>=1.63\n", "abc1234", "2026-09-16T12:00:00Z")
-    assert changed
-    assert text == "# deploy stamp: abc1234 2026-09-16T12:00:00Z\nstreamlit>=1.63\n"
-
-
-def test_an_existing_stamp_anywhere_is_moved_to_the_top():
-    original = "streamlit>=1.63\n# deploy stamp: old0000 2026-01-01T00:00:00Z\npyyaml\n"
-    text, changed = ds.apply_stamp(original, "new1111", "2026-09-16T12:00:00Z")
-    assert changed
-    assert text == "# deploy stamp: new1111 2026-09-16T12:00:00Z\nstreamlit>=1.63\npyyaml\n"
-
-
-def test_two_stamps_become_one():
-    text, _ = ds.apply_stamp("# deploy stamp: aaa 1\n# deploy stamp: bbb 2\nx\n", "ccc", "3")
-    assert text.count(ds.STAMP_PREFIX) == 1
-    assert text == "# deploy stamp: ccc 3\nx\n"
-
-
-def test_an_indented_stamp_is_still_a_stamp():
-    text, _ = ds.apply_stamp("  # deploy stamp: aaa 1\nx\n", "ccc", "3")
-    assert text == "# deploy stamp: ccc 3\nx\n"
-
-
-def test_crlf_and_a_missing_final_newline_are_normalised():
-    text, _ = ds.apply_stamp("a>=1\r\nb>=2", "ccc", "3")
-    assert text == "# deploy stamp: ccc 3\na>=1\nb>=2\n"
-
-
-def test_an_empty_file_gets_just_the_stamp():
-    text, changed = ds.apply_stamp("", "ccc", "3")
-    assert changed
-    assert text == "# deploy stamp: ccc 3\n"
-
-
-def test_a_second_nudge_for_the_same_commit_still_changes_the_file():
-    """The point is that the file differs from what Community Cloud last saw,
-    so two nudges for one commit must both count."""
-    first, _ = ds.apply_stamp("x\n", "abc1234", "2026-09-16T12:00:00Z")
-    second, changed = ds.apply_stamp(first, "abc1234", "2026-09-16T12:30:00Z")
-    assert changed
-    assert first != second
-
-
-def test_an_identical_stamp_is_reported_unchanged():
-    first, _ = ds.apply_stamp("x\n", "abc1234", "2026-09-16T12:00:00Z")
-    _, changed = ds.apply_stamp(first, "abc1234", "2026-09-16T12:00:00Z")
-    assert not changed
-
-
-def test_the_current_stamp_can_be_read_back():
-    text, _ = ds.apply_stamp("x\n", "abc1234", "2026-09-16T12:00:00Z")
-    assert ds.current_stamp(text) == "abc1234"
-    assert ds.current_stamp("x\n") == ""
-    assert ds.current_stamp("   # deploy stamp: zzz 1\n") == "zzz"
-
-
-def test_the_stamp_installs_nothing():
-    """A comment, and only a comment. pip must see no new requirement."""
-    text, _ = ds.apply_stamp("streamlit>=1.63\n", "abc1234", "2026-09-16T12:00:00Z")
-    requirements = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
-    assert requirements == ["streamlit>=1.63"]
-
-
-def test_the_shipped_requirements_carry_exactly_one_stamp_on_line_one():
-    text = (ROOT / "requirements.txt").read_text()
-    assert text.count(ds.STAMP_PREFIX) == 1
-    assert text.splitlines()[0].startswith(ds.STAMP_PREFIX)
-
-
-def test_the_stamp_script_writes_and_reports(tmp_path):
-    target = tmp_path / "requirements.txt"
-    target.write_text("streamlit>=1.63\n")
-    assert ds.main(["abc1234", str(target)]) == 0
-    assert ds.current_stamp(target.read_text()) == "abc1234"
-
-
-def test_the_stamp_script_refuses_a_missing_file(tmp_path):
-    assert ds.main(["abc1234", str(tmp_path / "nope.txt")]) == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1013,29 +1136,113 @@ def _step(job, step_id):
     return next(s for s in _workflow()["jobs"][job]["steps"] if s.get("id") == step_id)
 
 
-def test_the_wake_job_reports_a_stale_deploy_as_a_warning():
+def _wake_run() -> str:
     steps = _workflow()["jobs"]["wake"]["steps"]
-    wake = next(s for s in steps if "keep_streamlit_awake.py" in str(s.get("run", "")))
-    assert "--tools-as-warnings" in wake["run"]
-    assert "--expect-build" in wake["run"]
-    assert "--stale-grace-seconds" not in wake["run"]
+    return next(s for s in steps
+                if "keep_streamlit_awake.py" in str(s.get("run", "")))["run"]
 
 
-def test_the_deploy_job_is_strict_and_retries():
+def _enclosing_if(script: str, needle: str) -> str:
+    """The `if [ ... ]; then` line that guards the line holding needle, or ""."""
+    lines = script.splitlines()
+    index = next(i for i, line in enumerate(lines) if needle in line)
+    depth = 0
+    for line in reversed(lines[:index]):
+        text = line.strip()
+        if text == "fi":
+            depth += 1
+        elif text.startswith("if ") and text.endswith("then"):
+            if depth == 0:
+                return text
+            depth -= 1
+    return ""
+
+
+def test_the_wake_job_reports_a_stale_deploy_as_a_warning_with_a_grace():
+    run = _wake_run()
+    assert "--tools-as-warnings" in run
+    assert "--expect-build" in run
+    assert "--stale-grace-seconds" in run
+    assert "--deployed-at" in run
+    assert "set -euo pipefail" in run
+
+
+def test_the_grace_rides_only_with_the_schedule():
+    """A push run is inside any sensible grace by definition, and the commit
+    time of a pushed head is hours old when an old commit is pushed back on
+    purpose. Passing the grace there failed that push's own run at once."""
+    run = _wake_run()
+    guard = _enclosing_if(run, "--stale-grace-seconds")
+    assert "github.event_name }}\" = \"schedule\"" in guard, guard
+    assert _enclosing_if(run, "--deployed-at") == guard
+
+
+def test_the_wake_job_never_measures_against_a_session_branch_head():
+    """When the deploy branch cannot be fetched the fallback used to pass this
+    checkout's sha and commit time, so a session branch push with a fetch
+    blip measured the live app against the wrong commit."""
+    registry = _step("wake", "registry")["run"]
+    assert "$GITHUB_SHA" not in registry
+    assert "--format=%ct HEAD" not in registry
+    assert 'echo "sha=" >>' in registry
+    assert 'echo "committed_at=" >>' in registry
+    run = _wake_run()
+    guard = _enclosing_if(run, "--expect-build")
+    assert "steps.registry.outputs.sha" in guard, guard
+
+
+def test_the_age_is_the_committer_time_of_the_deploy_branch_head():
+    registry = _step("wake", "registry")["run"]
+    assert "git log -1 --format=%ct FETCH_HEAD" in registry, (
+        "%ct of FETCH_HEAD: the author time can be far older on a rebased "
+        "commit, and HEAD is whatever branch this run happens to be on")
+
+
+def test_the_wake_job_knows_the_deploy_branch_history():
+    registry = _step("wake", "registry")["run"]
+    assert "--depth=200" in registry
+    assert "git log --format=%H FETCH_HEAD > known-builds.txt" in registry
+    assert "--known-builds known-builds.txt" in _wake_run()
+
+
+def test_both_jobs_bound_a_pass_and_the_timeouts_are_sized_to_it():
+    """A pass in which every page times out ran over an hour and killed the
+    job with a generic timeout, a failure email for an app that is up. Each
+    pass is now bounded and the job timeouts are computed from the bound."""
+    data = _workflow()
+    budget = float(data["env"]["PASS_BUDGET_SECONDS"])
+    assert 300 <= budget <= 900, budget
+    worst_pass_min = (budget + ka.WORST_TOOL_READ_S) / 60
+    for job in ("wake", "deploy-current"):
+        scripts = " ".join(str(s.get("run", "")) for s in data["jobs"][job]["steps"])
+        assert '--pass-budget "$PASS_BUDGET_SECONDS"' in scripts, job
+    install_and_wake_min = 8
+    assert data["jobs"]["wake"]["timeout-minutes"] >= worst_pass_min + install_and_wake_min
+    deploy = data["jobs"]["deploy-current"]
+    assert "--retry-until-current 1200" in " ".join(
+        str(s.get("run", "")) for s in deploy["steps"])
+    assert deploy["timeout-minutes"] >= 2 * worst_pass_min + 20 + install_and_wake_min
+
+
+def test_the_grace_is_longer_than_community_cloud_has_ever_taken():
+    """Two hours was the worst self applied lag measured. Three is the grace.
+    Shorter would email about a deploy that is about to fix itself; much
+    longer would sit on a stuck one."""
+    grace = int(_workflow()["env"]["STALE_GRACE_SECONDS"])
+    assert 2.5 * 3600 <= grace <= 6 * 3600, grace
+
+
+def test_the_deploy_job_warns_and_waits_rather_than_failing():
+    """A change still unapplied after twenty minutes is normal here. The job
+    confirms the prompt case quickly and never emails on its own."""
     steps = _workflow()["jobs"]["deploy-current"]["steps"]
     probes = [s for s in steps if "keep_streamlit_awake.py" in str(s.get("run", ""))]
-    assert len(probes) == 2, "one look before the nudge and one after"
-    for probe in probes:
-        assert "--tools-as-warnings" not in probe["run"]
-        assert "--retry-until-current" in probe["run"]
-
-
-def test_the_first_look_annotates_softly_and_the_second_does_not():
-    first = _step("deploy-current", "first")
-    second = _step("deploy-current", "second")
-    assert "--soft-annotations" in first["run"]
-    assert "--soft-annotations" not in second["run"]
-    assert first.get("continue-on-error") is True
+    assert len(probes) == 1
+    run = probes[0]["run"]
+    assert "--tools-as-warnings" in run
+    assert "--retry-until-current" in run
+    assert "--stale-grace-seconds" not in run, (
+        "an age is meaningless a minute after a push")
 
 
 def test_the_deploy_job_never_runs_on_the_schedule():
@@ -1052,8 +1259,6 @@ def test_the_deploy_job_runs_only_for_the_deploy_branch():
 
 
 def test_the_deploy_job_does_not_wait_for_the_wake_job():
-    """Serialising them put the verdict seven minutes later than it needed
-    to be, under the observed latency of the path it is measuring."""
     assert "needs" not in _workflow()["jobs"]["deploy-current"]
 
 
@@ -1070,88 +1275,30 @@ def test_deploy_branch_runs_have_their_own_queue():
     assert data["concurrency"]["cancel-in-progress"] is False
 
 
-def test_the_nudge_cannot_start_another_nudge():
-    data = _workflow()
-    condition = data["jobs"]["deploy-current"]["if"]
-    assert "[deploy-stamp]" in condition
-    nudge = _step("deploy-current", "nudge")
-    assert "[deploy-stamp]" in nudge["run"], (
-        "the stamp commit message must carry the tag the job filters on")
-
-
-def test_the_nudge_does_not_restamp_a_redeploy_still_building():
-    nudge = _step("deploy-current", "nudge")
-    assert "-lt 900" in nudge["run"]
-    assert "Not stamping again" in nudge["run"]
-
-
-def test_only_the_deploy_job_may_write():
+def test_nothing_in_the_workflow_writes_to_the_repository():
+    """The nudge that wrote a stamp commit is gone: a dependency file change
+    did not make Community Cloud redeploy any faster than an ordinary push,
+    measured twice, and it left bot commits on the branch for nothing."""
     data = _workflow()
     assert data["permissions"] == {"contents": "read"}
-    assert "permissions" not in data["jobs"]["wake"]
-    assert data["jobs"]["deploy-current"]["permissions"] == {"contents": "write"}
+    for job in data["jobs"].values():
+        assert "permissions" not in job
+        scripts = " ".join(str(s.get("run", "")) for s in job["steps"])
+        assert "git push" not in scripts
+        assert "git commit" not in scripts
+        assert "deploy_stamp" not in scripts
+    assert not (ROOT / "scripts" / "deploy_stamp.py").exists()
 
 
-def test_the_nudge_is_gated_on_the_app_being_up():
-    """A down app gets no stamp. A nudge would not help it, and the second
-    wait would then blame Community Cloud for a redeploy it never asked for."""
-    nudge = _step("deploy-current", "nudge")
-    assert "steps.first.outputs.up == 'true'" in nudge["if"]
-    first = _step("deploy-current", "first")
-    assert "up=" in first["run"] and "status=" in first["run"]
-    down = next(s for s in _workflow()["jobs"]["deploy-current"]["steps"]
-                if "down rather than stale" in s.get("name", ""))
-    assert "exit 1" in down["run"]
+def test_the_requirements_file_carries_no_stamp():
+    text = (ROOT / "requirements.txt").read_text()
+    assert "deploy stamp" not in text
+    assert text.splitlines()[0].startswith("#") or text.splitlines()[0].strip()
 
 
-def test_the_nudge_uses_the_stamp_script_and_only_touches_requirements():
-    nudge = _step("deploy-current", "nudge")
-    assert "set -euo pipefail" in nudge["run"]
-    assert "scripts/deploy_stamp.py" in nudge["run"]
-    assert 'grep -q "STAMP RESULT: WRITTEN"' in nudge["run"]
-    assert "git add requirements.txt" in nudge["run"]
-    assert "git add ." not in nudge["run"]
-    assert "git add -A" not in nudge["run"]
-    assert "--force" not in nudge["run"]
-
-
-def test_a_rejected_nudge_push_is_told_apart_from_a_moved_branch():
-    """Both used to read as "someone else pushed" and go green. A branch rule
-    or a bad token that rejects the nudge is a deploy that cannot self heal,
-    and that is a failure."""
-    nudge = _step("deploy-current", "nudge")
-    assert 'echo "pushed=false"' in nudge["run"]
-    assert "has not moved" in nudge["run"]
-    assert "::error::" in nudge["run"]
-    assert "::warning::" in nudge["run"]
-    second = _step("deploy-current", "second")
-    assert "steps.nudge.outputs.pushed == 'true'" in second["if"]
-
-
-def test_the_second_wait_expects_the_stamp_commit():
-    nudge = _step("deploy-current", "nudge")
-    second = _step("deploy-current", "second")
-    assert 'echo "sha=' in nudge["run"]
-    assert "steps.nudge.outputs.sha" in second["run"]
-
-
-def test_the_second_wait_tolerates_a_redeploy_in_progress():
-    second = _step("deploy-current", "second")
-    assert "for attempt in 1 2" in second["run"]
-    assert "sleep 120" in second["run"]
-
-
-def test_the_reboot_button_exists():
-    """A dispatch with force nudge skips the wait and stamps at once, which is
-    the owner's replacement for the reboot button on share.streamlit.io."""
-    data = _workflow()
-    triggers = data.get("on", data.get(True))
-    assert triggers["workflow_dispatch"]["inputs"]["force_nudge"]["type"] == "boolean"
-    first = _step("deploy-current", "first")
-    assert "env.FORCE_NUDGE != 'true'" in first["if"]
-    nudge = _step("deploy-current", "nudge")
-    assert "env.FORCE_NUDGE == 'true'" in nudge["if"]
-
-
-def test_the_deploy_job_outlives_a_pass_of_timeouts():
-    assert _workflow()["jobs"]["deploy-current"]["timeout-minutes"] >= 90
+def test_the_workflow_states_the_measured_platform_behaviour():
+    """The comment is the record of why the nudge is gone. If it is removed
+    someone will add the nudge back."""
+    raw = (ROOT / ".github" / "workflows" / "keep-awake.yml").read_text()
+    assert "tried, twice" in raw
+    assert "Reboot" in raw

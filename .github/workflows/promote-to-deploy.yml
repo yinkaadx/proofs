@@ -267,9 +267,9 @@ jobs:
         # keep-awake.yml's push trigger never sees the merge above. A
         # workflow_dispatch made with the same token does start a run, and
         # keep-awake.yml's deploy-current job runs on a dispatch from the
-        # deploy branch: it waits for Community Cloud to apply the merge,
-        # nudges it with a dependency file change if it has not, and fails
-        # once, on that run, if the app is still stale after that.
+        # deploy branch: it waits twenty minutes for Community Cloud to apply
+        # the merge and reports, as a warning if it has not, because a slow
+        # apply is normal there and only an app that is down fails it.
         #
         # This step used to probe the live app itself, eight looks a minute
         # apart, then tell the owner to reboot the app by hand. That was one

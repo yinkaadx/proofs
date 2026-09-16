@@ -34,14 +34,32 @@ is how the next real outage gets deleted unread.
 
 So the tool check has two modes:
 
-  strict (default)     a stale or unproven deploy fails the run. Used right
-                       after a push, once, with retries, by the deploy-current
-                       job. One push, one verdict, at most one email.
+  strict (default)     a stale or unproven deploy fails the run. Kept for a
+                       hand run that wants a plain yes or no. Neither job in
+                       keep-awake.yml uses it any more.
   --tools-as-warnings  a stale deploy is reported as a warning annotation and
                        in the job summary, and the run passes as long as the
-                       app is awake and serving. Used by the three hourly wake.
-                       A stale deploy is announced once, by the strict run on
-                       the push that caused it, and never re announced.
+                       app is awake and serving. Used by both jobs, because a
+                       change that Community Cloud has not applied yet is the
+                       normal state for up to two hours and is not news.
+  --stale-grace-seconds with --deployed-at: a deploy that is positively stale,
+                       a tool missing or a build label behind the branch, and
+                       whose branch head has been out longer than the grace,
+                       fails after all. That is a stuck deploy, the one deploy
+                       condition worth an email, because the fix is a person
+                       pressing Reboot on share.streamlit.io, and it repeats
+                       every scheduled run until that button is pressed. Only
+                       the schedule passes these two: a push run is inside any
+                       sensible grace by definition, and the commit time of a
+                       pushed head can be hours old when an old commit is
+                       pushed back on purpose. A page that merely could not
+                       be read never escalates: the first draft of this let
+                       it, and one flaky read on a quiet branch brought the
+                       every three hours email straight back. Nor does an
+                       empty main column, a pass that ran out of time, or a
+                       build label that is not in the branch history at all:
+                       each is the prober failing to look, not the deploy
+                       failing to land.
 
 Two states that are not "stale". An app whose every registered tool falls
 back to the landing page is not running an old build, it is not serving tools
@@ -155,32 +173,61 @@ class AppResult:
     # build that is neither this nor "unknown" is a checkout that has not been
     # updated, which is staleness with no missing tool to show for it.
     expected_build: str = ""
+    # Seconds since the deploy branch head was committed, when the caller
+    # knows it. Only ever read together with positive staleness.
+    stale_for: float | None = None
+    # Commits on the deploy branch behind the head, when the caller knows
+    # them. With this list a mismatch counts only when the live label is one
+    # of these, an old checkout of this very branch. Without it any label
+    # that is not the head counts, which is the deploy-current job's view a
+    # minute after a push and is never escalated.
+    known_builds: tuple[str, ...] = ()
 
     @property
     def verified(self) -> bool:
         """Every tool this run was asked about was positively resolved."""
         if not self.tools_requested:
             return True
-        return not self.missing_tools and not self.unchecked_tools
+        return (not self.missing_tools and not self.unchecked_tools
+                and not self.build_unrecognised)
 
     @property
     def unproven(self) -> bool:
-        """Awake, nothing found missing, and nothing actually confirmed."""
-        return bool(self.tools_requested and self.unchecked_tools
-                    and not self.missing_tools)
+        """Awake, nothing found missing, and something not confirmed."""
+        return bool(self.tools_requested
+                    and (self.unchecked_tools or self.build_unrecognised)
+                    and not self.missing_tools and not self.build_mismatch)
 
     @property
     def build_mismatch(self) -> bool:
-        """The sidebar names a real commit and it is not the deploy head.
+        """The sidebar names an older commit of this branch than the head.
 
         A match proves nothing: the label is read from the checkout at render
         time and a git pull updates the checkout before the process reloads.
         A mismatch is proof, because an old checkout cannot be running new
-        code. So only the mismatch is ever acted on.
+        code. So only the mismatch is ever acted on, and when the branch
+        history is known, only a label found in that history counts: a label
+        that is on no known commit (a merge Community Cloud made on its side,
+        a detached checkout) says nothing about whether the code is old, and
+        treating it as proof would fail every scheduled run until a Reboot.
         """
         live = self.live_build
-        return bool(self.expected_build and live and live != "unknown"
-                    and not self.expected_build.startswith(live))
+        if not (self.expected_build and live and live != "unknown"):
+            return False
+        if self.expected_build.startswith(live):
+            return False
+        if self.known_builds:
+            return any(sha.startswith(live) for sha in self.known_builds)
+        return True
+
+    @property
+    def build_unrecognised(self) -> bool:
+        """A real label that is neither the head nor any known ancestor."""
+        live = self.live_build
+        return bool(self.expected_build and self.known_builds and live
+                    and live != "unknown"
+                    and not self.expected_build.startswith(live)
+                    and not any(sha.startswith(live) for sha in self.known_builds))
 
     @property
     def ok(self) -> bool:
@@ -204,7 +251,7 @@ class AppResult:
             return "UNCHECKED"
         if self.missing_tools or self.build_mismatch:
             return "STALE"
-        if self.unchecked_tools:
+        if self.unchecked_tools or self.build_unrecognised:
             return "UNPROVEN"
         return "CURRENT"
 
@@ -234,6 +281,22 @@ def parse_app_list(text: str) -> list[str]:
         if url and url not in apps:
             apps.append(url)
     return apps
+
+
+def _optional_float(text: str) -> float | None:
+    """argparse type: a number, or None for blank. A registry step whose git
+    log printed nothing must not turn into a usage error, exit 2, which is a
+    failure that is neither a down app nor a stuck deploy."""
+    text = str(text or "").strip()
+    return float(text) if text else None
+
+
+def load_known_builds(path: Path) -> tuple[str, ...]:
+    """Commit shas, one per line, as written by `git log --format=%H`."""
+    if not path.is_file():
+        return ()
+    return tuple(line.strip().lower() for line in path.read_text().splitlines()
+                 if re.fullmatch(r"[0-9a-f]{7,40}", line.strip().lower()))
 
 
 def load_apps(path: Path | None) -> list[str]:
@@ -313,11 +376,20 @@ def _tool_problem(result: AppResult) -> str:
         # failed to look, so the only honest report is that the deploy is
         # unproven, and a job asked to prove it must not exit 0 having proved
         # nothing.
-        confirmed = result.tools_requested - len(result.unchecked_tools)
-        return (f"could not read {len(result.unchecked_tools)} of "
-                f"{result.tools_requested} tool page(s), so the deploy is "
-                f"UNPROVEN rather than stale ({confirmed} confirmed): "
-                + ", ".join(result.unchecked_tools))
+        parts = []
+        if result.unchecked_tools:
+            confirmed = result.tools_requested - len(result.unchecked_tools)
+            parts.append(f"could not read {len(result.unchecked_tools)} of "
+                         f"{result.tools_requested} tool page(s) "
+                         f"({confirmed} confirmed): "
+                         + ", ".join(result.unchecked_tools))
+        if result.build_unrecognised:
+            parts.append(f"the live app reports build {result.live_build}, "
+                         f"which is neither the deploy branch head "
+                         f"{result.expected_build[:7]} nor any of the "
+                         f"{len(result.known_builds)} known commits behind "
+                         f"it, so the label proves nothing either way")
+        return "; and ".join(parts) + ", so the deploy is UNPROVEN rather than stale"
     return ""
 
 
@@ -351,18 +423,27 @@ def deploy_status_line(results: list[AppResult]) -> str:
     return f"DEPLOY STATUS: {status}, {detail}{_build_note(worst)}"
 
 
-def verdict(results: list[AppResult],
-            stale_is_failure: bool = True) -> tuple[int, list[str]]:
+def past_grace(result: AppResult, grace_seconds: float | None) -> bool:
+    """Positively stale, and out longer than Community Cloud has ever taken.
+
+    Positive means a tool fell back to the landing page or the build label is
+    behind the branch. UNPROVEN never qualifies: a page that could not be read
+    is the prober's failure, not the deploy's, and escalating on it turned one
+    flaky read on a quiet branch into a failure every three hours.
+    """
+    return bool(grace_seconds is not None and result.stale_for is not None
+                and result.stale_for > grace_seconds
+                and result.deploy_status == "STALE")
+
+
+def verdict(results: list[AppResult], stale_is_failure: bool = True,
+            stale_grace_seconds: float | None = None) -> tuple[int, list[str]]:
     """Turn results into the exit code and the lines a CI log is parsed for.
 
     stale_is_failure True is the strict mode: a stale or unproven deploy fails
-    the run. False is the warning mode for the schedule, where the app being
-    up and serving is the pass and the deploy is reported without deciding the
-    exit code. There is deliberately no age based escalation in warning mode.
-    One was tried, measured from the deploy head's commit time, and it turned
-    a single flaky page read on a quiet branch back into a failure email every
-    three hours, which is the condition this mode exists to remove. A stale
-    deploy is announced once, by the strict run on the push that caused it.
+    the run. False is the warning mode, where the app being up and serving is
+    the pass and the deploy is reported without deciding the exit code, with
+    one exception: a deploy that past_grace() says is stuck fails anyway.
     """
     lines: list[str] = []
     # Three different failures, counted apart, because saying "not awake"
@@ -371,6 +452,7 @@ def verdict(results: list[AppResult],
     for result in results:
         problem = _tool_problem(result)
         state = "woken from sleep" if result.was_asleep else "already awake"
+        stuck = past_grace(result, stale_grace_seconds)
         if result.ok:
             checked = (f", all {result.tools_requested} tools confirmed"
                        if result.tools_requested else "")
@@ -379,8 +461,16 @@ def verdict(results: list[AppResult],
             lines.append(f"  FAIL {result.url} "
                          f"{result.error or 'the app never rendered'}")
             down += 1
-        elif stale_is_failure:
-            lines.append(f"  FAIL {result.url} {problem}")
+        elif stale_is_failure or stuck:
+            suffix = ""
+            if stuck:
+                suffix = (f". The deploy branch head has been out for "
+                          f"{result.stale_for / 3600:.1f} hours, past the "
+                          f"{stale_grace_seconds / 3600:.0f} hour grace within "
+                          f"which Community Cloud has applied every push on "
+                          f"its own, so this deploy is stuck. Press Reboot on "
+                          f"share.streamlit.io")
+            lines.append(f"  FAIL {result.url} {problem}{suffix}")
             if result.unproven:
                 unproven += 1
             else:
@@ -410,7 +500,10 @@ def verdict(results: list[AppResult],
 
 
 def read_health(app_url: str, timeout: int = 30) -> str:
-    """Ask the one endpoint that cannot lie about whether the server is up."""
+    """The server's own health endpoint, recorded as evidence in the log and
+    the summary. It does not decide the verdict: the rendered app frame does,
+    because that is what a visitor sees, and a flaky health read on an app
+    that is visibly serving must not become a failure."""
     try:
         request = urllib.request.Request(
             health_url(app_url),
@@ -556,9 +649,18 @@ def _key_of(entry: str) -> str:
     return entry.split(" (", 1)[0]
 
 
+# One tool read at its worst: navigation, the app frame, the app shell, the
+# main column and the text read can each time out in turn. A pass budget is
+# overrun by at most this much, which is what the job timeouts are sized to.
+WORST_TOOL_READ_S = (NAV_TIMEOUT_MS + FRAME_TIMEOUT_MS + 2 * TOOL_TIMEOUT_MS
+                     + 30_000) / 1000
+
+
 def verify_tools(page, app_url: str, tools: list[tuple[str, str]],
                  home_fingerprint: str,
-                 only: set[str] | None = None) -> tuple[list[str], list[str]]:
+                 only: set[str] | None = None,
+                 budget_seconds: float | None = None,
+                 clock=time.monotonic) -> tuple[list[str], list[str]]:
     """Confirm every registered tool is actually reachable on the live app.
 
     This is what catches a deploy that never picked up the newest push. A tool
@@ -571,17 +673,31 @@ def verify_tools(page, app_url: str, tools: list[tuple[str, str]],
     be read at all is UNCHECKED, not missing: a timeout says the prober failed
     to look, not that the tool is absent, and the first live run proved how
     badly that conflation reads by declaring all seventeen tools missing from
-    an app that was serving every one of them.
+    an app that was serving every one of them. An empty main column is the
+    same: nothing painted in time is the prober's failure, and calling it the
+    landing page turned one slow paint into positive staleness.
+
+    The budget is wall clock per pass. A pass in which every page times out
+    would otherwise run over an hour and the job would die with a generic
+    timeout, which is a failure email about an app that is up. Past the
+    budget the rest of the list is UNCHECKED and the pass ends.
     """
     missing: list[str] = []
     unchecked: list[str] = []
-    for key, _title in tools:
+    started = clock()
+    wanted = [key for key, _title in tools if only is None or key in only]
+    for position, key in enumerate(wanted):
         # A retry only needs to look again at what was not confirmed. Reading
         # all thirty tools every pass costs three and a half minutes a pass,
         # which is most of the wait budget spent re proving what is already
         # proved.
-        if only is not None and key not in only:
-            continue
+        if budget_seconds is not None and clock() - started > budget_seconds:
+            rest = wanted[position:]
+            unchecked.extend(f"{k} (pass budget of {int(budget_seconds)}s spent)"
+                             for k in rest)
+            print(f"  ?    pass budget of {int(budget_seconds)}s spent, "
+                  f"{len(rest)} tool(s) left unread")
+            break
         url = tool_url(app_url, key)
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
@@ -589,6 +705,10 @@ def verify_tools(page, app_url: str, tools: list[tuple[str, str]],
         except Exception as exc:                  # noqa: BLE001
             unchecked.append(f"{key} ({type(exc).__name__})")
             print(f"  ?    {url} could not be read: {type(exc).__name__}")
+            continue
+        if not fingerprint(main):
+            unchecked.append(f"{key} (empty main column)")
+            print(f"  ?    {url} painted nothing in time, so it was not read")
             continue
         if tool_is_live(main, home_fingerprint):
             print(f"  ok   {url}")
@@ -636,7 +756,8 @@ def _merge_passes(previous_missing: list[str], missing_now: list[str],
 def run(apps: list[str], tools: list[tuple[str, str]],
         shots: Path | None, chromium: str = "",
         retry_until_current: float = 0, retry_every: float = 60,
-        expect_build: str = "",
+        expect_build: str = "", known_builds: tuple[str, ...] = (),
+        pass_budget: float | None = None,
         sleep=time.sleep, clock=time.monotonic) -> list[AppResult]:
     from playwright.sync_api import sync_playwright   # imported here on purpose
 
@@ -661,6 +782,7 @@ def run(apps: list[str], tools: list[tuple[str, str]],
             # every single page still knows how many it was supposed to prove.
             result.tools_requested = len(tools)
             result.expected_build = expect_build
+            result.known_builds = tuple(known_builds)
             if result.awake and tools:
                 # Take the landing page as it stands right now, so a tool page
                 # is measured against this app rather than a hardcoded string.
@@ -674,7 +796,8 @@ def run(apps: list[str], tools: list[tuple[str, str]],
                 print(f"  .    live app reports build "
                       f"{result.live_build or 'not read'}")
                 result.missing_tools, result.unchecked_tools = verify_tools(
-                    page, app, tools, home_fingerprint)
+                    page, app, tools, home_fingerprint,
+                    budget_seconds=pass_budget, clock=clock)
                 # Community Cloud applies a push late, sometimes very late, so
                 # a look taken a minute after the push reports a stale deploy
                 # that is merely a young one. Keep looking, at only the tools
@@ -694,7 +817,8 @@ def run(apps: list[str], tools: list[tuple[str, str]],
                     result.retries += 1
                     if pending:
                         missing, unchecked = verify_tools(
-                            page, app, tools, home_fingerprint, only=pending)
+                            page, app, tools, home_fingerprint, only=pending,
+                            budget_seconds=pass_budget, clock=clock)
                         result.missing_tools, result.unchecked_tools = (
                             _merge_passes(result.missing_tools, missing,
                                           unchecked))
@@ -741,14 +865,28 @@ def main(argv: list[str] | None = None) -> int:
                              "and pass as long as the app is awake. For the "
                              "schedule, whose failure must mean the app is "
                              "down.")
-    parser.add_argument("--soft-annotations", action="store_true",
-                        help="Emit FAIL lines as warning annotations rather "
-                             "than error ones. For a look that is expected to "
-                             "fail and be retried, so a green run does not "
-                             "carry a red mark from its first attempt.")
+    parser.add_argument("--stale-grace-seconds", type=float, default=None,
+                        help="With --tools-as-warnings and --deployed-at: a "
+                             "positively stale deploy whose branch head has "
+                             "been out longer than this fails anyway, because "
+                             "it is stuck and needs a person.")
+    parser.add_argument("--deployed-at", type=_optional_float, default=None,
+                        help="Unix time the deploy branch head was committed, "
+                             "so the age of a stale deploy can be stated. "
+                             "Blank means unknown, not a usage error.")
     parser.add_argument("--expect-build", default="",
                         help="The commit the deploy branch is at, to compare "
                              "against the build the live app reports.")
+    parser.add_argument("--known-builds", default="",
+                        help="File of commit shas on the deploy branch, one "
+                             "per line, newest first. With it a build label "
+                             "counts as stale only when it names one of "
+                             "these; a label on no known commit is UNPROVEN.")
+    parser.add_argument("--pass-budget", type=float, default=None,
+                        help="Wall clock seconds one pass over the tool list "
+                             "may take before the rest is left unchecked, so "
+                             "a slow app is UNPROVEN rather than a job that "
+                             "dies of its own timeout.")
     parser.add_argument("--retry-until-current", type=float, default=0,
                         help="Seconds to keep re checking unconfirmed tools "
                              "before giving a verdict. 0 looks once.")
@@ -765,19 +903,32 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Verifying {len(tools)} registered tool"
               f"{'' if len(tools) == 1 else 's'} against the live app.")
 
+    known_builds = load_known_builds(Path(args.known_builds)) if args.known_builds else ()
+    if known_builds:
+        print(f"{len(known_builds)} commit(s) of the deploy branch are known, "
+              f"so only a label on one of them counts as an old checkout.")
+
     shots = Path(args.shots) if args.shots else None
     print(f"Keeping {len(apps)} app{'' if len(apps) == 1 else 's'} awake.")
     results = run(apps, tools, shots, args.chromium,
                   retry_until_current=args.retry_until_current,
                   retry_every=args.retry_every,
-                  expect_build=args.expect_build)
+                  expect_build=args.expect_build,
+                  known_builds=known_builds,
+                  pass_budget=args.pass_budget)
+
+    if args.deployed_at is not None:
+        age = max(0.0, time.time() - args.deployed_at)
+        for result in results:
+            result.stale_for = age
 
     code, lines = verdict(results,
-                          stale_is_failure=not args.tools_as_warnings)
+                          stale_is_failure=not args.tools_as_warnings,
+                          stale_grace_seconds=args.stale_grace_seconds)
     print()
     for line in lines:
         print(line)
-    emit_annotations(lines, soft=args.soft_annotations)
+    emit_annotations(lines)
 
     summary = {
         "expected_build": args.expect_build,
@@ -787,8 +938,10 @@ def main(argv: list[str] | None = None) -> int:
              "unchecked_tools": r.unchecked_tools, "error": r.error,
              "live_build": r.live_build, "expected_build": r.expected_build,
              "build_mismatch": r.build_mismatch,
+             "build_unrecognised": r.build_unrecognised,
+             "known_builds": len(r.known_builds),
              "deploy_status": r.deploy_status, "retries": r.retries,
-             "up": r.up}
+             "up": r.up, "stale_for_seconds": r.stale_for}
             for r in results
         ]
     }
@@ -797,7 +950,7 @@ def main(argv: list[str] | None = None) -> int:
     return code
 
 
-def emit_annotations(lines: list[str], soft: bool = False) -> None:
+def emit_annotations(lines: list[str]) -> None:
     """Surface WARN and FAIL lines where GitHub shows them on the run page.
 
     A warning annotation is visible without opening the log and does not send
@@ -809,7 +962,7 @@ def emit_annotations(lines: list[str], soft: bool = False) -> None:
         if text.startswith("WARN "):
             print(f"::warning::{text[5:]}")
         elif text.startswith("FAIL "):
-            print(f"::{'warning' if soft else 'error'}::{text[5:]}")
+            print(f"::error::{text[5:]}")
 
 
 def write_step_summary(lines: list[str]) -> None:

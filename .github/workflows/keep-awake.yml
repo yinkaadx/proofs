@@ -6,27 +6,44 @@
 # on a sleeping app. Only a real browser session opens the websocket that
 # Community Cloud counts as a visit, so this drives headless Chromium.
 #
-# Two jobs, because two questions.
+# What Community Cloud actually does with a push, measured on 16 September
+# 2026 across a day of pushes: it applies it on its own, between four minutes
+# and about two hours later, with the app already awake throughout. Nothing
+# pushed from here makes that faster. Its documentation says a dependency
+# file change forces a full redeploy, so that was tried, twice, as an
+# automatic nudge: neither change was applied within forty minutes, and the
+# nudge left bot commits on the branch for nothing. The only lever that is
+# not a push is the Reboot button on share.streamlit.io, and it has no API.
+#
+# So this workflow is honest about that. Two jobs, because two questions.
 #
 #   wake            Is the app awake and serving. Runs on the schedule, on
-#                   every push and by hand. Its failure means the app is down
-#                   and nothing else. A stale deploy is reported here as a
-#                   warning annotation and in the job summary, not as a
-#                   failure: one job used to answer both questions with one
-#                   exit code, and the result was a failure email every three
-#                   hours for a condition that was already known, was not a
-#                   sleeping app, and had not changed since the last email.
-#                   That is how the next real outage gets deleted unread.
+#                   every push and by hand. Fails if the app is down, or if
+#                   every registered tool is missing (a broken build), or,
+#                   on the schedule only, if a change to the deploy branch
+#                   has sat positively unapplied for longer than Community
+#                   Cloud has ever taken on its own. That last one repeats
+#                   every scheduled run until someone presses Reboot, which
+#                   is the point: it needs a person. Inside the grace a stale
+#                   deploy is a warning annotation and a line in the job
+#                   summary, never a failure, because one job used to fail
+#                   every three hours for a condition that was already
+#                   known, was not a sleeping app, and had not changed since
+#                   the last email. That is how the next real outage gets
+#                   deleted unread. Anything the prober could not read, a
+#                   page that timed out or painted nothing, a pass that ran
+#                   out of time, a build label on no known commit, is
+#                   UNPROVEN and never escalates.
 #
-#   deploy-current  Is the live app running what just reached the deploy
-#                   branch. Runs once per change to that branch, by push or by
-#                   the dispatch promote-to-deploy.yml makes, never on the
-#                   schedule. Waits for Community Cloud to apply it, and when
-#                   Community Cloud does not, nudges it with the one change its
-#                   documentation says forces a full redeploy: a dependency
-#                   file change. Fails only if the app is still stale after
-#                   that. One change, one verdict, at most one email, and by
-#                   then it is news.
+#   deploy-current  Did the change that just reached the deploy branch go
+#                   live. Runs once per change, by push or by the dispatch
+#                   promote-to-deploy.yml makes, never on the schedule. Waits
+#                   twenty minutes, looking again each minute at only what is
+#                   not yet confirmed, and reports. The only failure it can
+#                   send is an app that is down: a change still unapplied
+#                   after twenty minutes is normal here and is a warning, and
+#                   the schedule carries that warning until it is applied or
+#                   the grace runs out.
 name: Keep Streamlit apps awake
 
 on:
@@ -45,25 +62,19 @@ on:
   push:
     branches: ["**"]
   workflow_dispatch:
-    inputs:
-      force_nudge:
-        description: "Skip the wait and make Community Cloud do a full redeploy now. This is the reboot button."
-        type: boolean
-        default: false
 
 # Two queues, not one. A single group held every event, with room for one
-# pending run, so a deploy branch push queued behind a forty minute deploy
-# check was cancelled by the next schedule tick or the next push to any
-# session branch, and its deploy verdict was never given. Deploy branch runs
-# now queue only behind each other, where being superseded by a newer push is
-# harmless because the newer push carries the older one's tools. Everything
-# else, the schedule and pushes to other branches, queues separately and never
-# touches that queue.
+# pending run, so a deploy branch push queued behind a long deploy check was
+# cancelled by the next schedule tick or the next push to any session branch,
+# and its verdict was never given. Deploy branch runs now queue only behind
+# each other, where being superseded by a newer push is harmless because the
+# newer push carries the older one's tools. Everything else, the schedule and
+# pushes to other branches, queues separately and never touches that queue.
 concurrency:
   group: keep-streamlit-awake-${{ (github.event_name != 'schedule' && github.ref_name == 'claude/kind-feynman-489x72') && 'deploy' || 'wake' }}
   cancel-in-progress: false
 
-# Read only by default. The one job that writes says so itself, below.
+# Read only. Nothing here writes to the repository any more.
 permissions:
   contents: read
 
@@ -71,10 +82,31 @@ env:
   # The branch Streamlit Community Cloud serves from, recorded in README.md.
   # Only used to decide which tool list the live app is measured against.
   DEPLOY_BRANCH: claude/kind-feynman-489x72
+  # Community Cloud applied every push today within about two hours on its
+  # own. Past three hours a change that is still unapplied is a deploy that
+  # is stuck, and stuck is the one deploy condition worth an email, because
+  # the fix is a person pressing Reboot on share.streamlit.io. The grace is
+  # measured from the commit time of the deploy branch head, which in this
+  # repository is within a minute of the push, and it counts only positive
+  # staleness: a tool that fell back to the landing page or a build label
+  # on an older commit of this branch. A page that merely could not be read
+  # never escalates. Only the schedule applies the grace: a push run is
+  # inside it by definition, and an old commit pushed back on purpose would
+  # otherwise fail its own push run at once.
+  STALE_GRACE_SECONDS: "10800"
+  # Wall clock seconds one pass over the tool list may take. A healthy pass
+  # over 33 tools is under four minutes. A pass in which every page times out
+  # would run over an hour, and the job dying of its own timeout is a failure
+  # email about an app that is up. Past this the rest of the list is left
+  # UNPROVEN. The job timeouts below are sized to this plus one worst case
+  # read, and tests/test_keep_streamlit_awake.py checks that arithmetic.
+  PASS_BUDGET_SECONDS: "600"
 
 jobs:
   wake:
     runs-on: ubuntu-latest
+    # Install, the wake itself, then one pass bounded by PASS_BUDGET_SECONDS
+    # plus one worst case read. Sized by the test, not by feel.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
@@ -97,25 +129,52 @@ jobs:
           # on the default branch, which can be ahead or behind, and comparing
           # against the wrong list would either miss a stale deploy or invent
           # a failure that is not real.
-          if git fetch --depth=1 origin "$DEPLOY_BRANCH" 2>/dev/null; then
+          #
+          # Two hundred commits deep, so the run also knows which commits are
+          # behind the head. The live app's build label is counted as an old
+          # checkout only when it is one of those; a label on no known commit
+          # proves nothing and is never escalated.
+          #
+          # If the fetch fails this run only wakes the app and checks the
+          # tools of this checkout as warnings. It says nothing about the
+          # deploy's build or age, because a session branch head is the wrong
+          # commit to measure the live app against and its commit time is the
+          # wrong age.
+          if git fetch --depth=200 origin "$DEPLOY_BRANCH" 2>/dev/null; then
             git show FETCH_HEAD:tools/registry.py > deployed-registry.py
+            git log --format=%H FETCH_HEAD > known-builds.txt
             echo "path=deployed-registry.py" >> "$GITHUB_OUTPUT"
             echo "sha=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
-            echo "Measuring the live app against $DEPLOY_BRANCH at $(git rev-parse --short FETCH_HEAD)."
+            echo "committed_at=$(git log -1 --format=%ct FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+            echo "Measuring the live app against $DEPLOY_BRANCH at $(git rev-parse --short FETCH_HEAD), with $(wc -l < known-builds.txt) commits of its history known."
           else
             echo "path=tools/registry.py" >> "$GITHUB_OUTPUT"
-            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
-            echo "Could not read $DEPLOY_BRANCH, falling back to this checkout."
+            echo "sha=" >> "$GITHUB_OUTPUT"
+            echo "committed_at=" >> "$GITHUB_OUTPUT"
+            echo "::warning::Could not read $DEPLOY_BRANCH, so this run only wakes the app and checks the tools of this checkout as warnings. It says nothing about the deploy's build or age."
           fi
 
       - name: Wake every app and prove it rendered
+        # The grace goes only with the schedule. A push run is inside any
+        # sensible grace by definition, and the commit time of a pushed head
+        # is hours old when an old commit is pushed back on purpose, which
+        # would otherwise fail that push's own run at once.
         run: |
-          python3 scripts/keep_streamlit_awake.py \
-            --apps .github/streamlit-apps.txt \
-            --registry "${{ steps.registry.outputs.path }}" \
-            --verify-tools --tools-as-warnings \
-            --expect-build "${{ steps.registry.outputs.sha }}" \
-            --shots keepalive-evidence
+          set -euo pipefail
+          args=(--apps .github/streamlit-apps.txt
+                --registry "${{ steps.registry.outputs.path }}"
+                --verify-tools --tools-as-warnings
+                --pass-budget "$PASS_BUDGET_SECONDS"
+                --shots keepalive-evidence)
+          if [ -n "${{ steps.registry.outputs.sha }}" ]; then
+            args+=(--expect-build "${{ steps.registry.outputs.sha }}"
+                   --known-builds known-builds.txt)
+          fi
+          if [ "${{ github.event_name }}" = "schedule" ] && [ -n "${{ steps.registry.outputs.committed_at }}" ]; then
+            args+=(--deployed-at "${{ steps.registry.outputs.committed_at }}"
+                   --stale-grace-seconds "$STALE_GRACE_SECONDS")
+          fi
+          python3 scripts/keep_streamlit_awake.py "${args[@]}"
 
       - name: Keep the evidence
         if: always()
@@ -129,37 +188,22 @@ jobs:
           if-no-files-found: ignore
 
   deploy-current:
-    # A change to the deploy branch is the one moment a stale deploy is news.
-    # The schedule never runs this, so it can never repeat the news.
+    # A change to the deploy branch is the one moment to find out quickly
+    # whether it went live. The schedule never runs this.
     #
     # The branch is spelled out rather than read from env because a job level
     # `if` cannot see env. tests/test_keep_streamlit_awake.py holds the two
     # spellings together.
     #
-    # Not `needs: wake`. The two jobs run side by side: the wake job's own
-    # look on a push is redundant with this one, and serialising them put the
-    # verdict here seven minutes later than it needed to be.
-    #
-    # A push made with GITHUB_TOKEN, which is what the nudge below makes,
-    # does not start workflows at all, so this cannot loop. The message check
-    # is a second lock on the same door for the day somebody pushes a stamp
-    # with a personal token.
+    # Not `needs: wake`. The two jobs run side by side; serialising them put
+    # this verdict seven minutes later than it needed to be.
     if: >-
       github.event_name != 'schedule'
       && github.ref_name == 'claude/kind-feynman-489x72'
-      && !contains(github.event.head_commit.message, '[deploy-stamp]')
     runs-on: ubuntu-latest
-    # Generous on purpose. A pass in which every tool page times out costs
-    # about forty minutes on its own, and the job must outlive one of those
-    # plus the nudge and the wait that follows, or it dies with a generic
-    # timeout in place of the diagnosis it was about to give.
-    timeout-minutes: 90
-    permissions:
-      # The nudge commits one comment line to the deploy branch. Nothing else
-      # here writes anywhere.
-      contents: write
-    env:
-      FORCE_NUDGE: ${{ github.event.inputs.force_nudge == 'true' }}
+    # Install, a first pass, the twenty minute window, and one last pass that
+    # may start just inside the window: two bounded passes plus the wait.
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -181,133 +225,22 @@ jobs:
           echo "sha=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
           echo "Measuring the live app against $DEPLOY_BRANCH at $(git rev-parse --short FETCH_HEAD)."
 
-      - name: Wait for Community Cloud to apply the change
-        id: first
-        # Six minutes. Today's pushes were applied in under four minutes when
-        # they were applied promptly at all, and in twenty to fifty when they
-        # were not. Waiting long on a path known to be flaky only delays the
-        # nudge that fixes it. This look is expected to fail sometimes, so its
-        # annotations are warnings: a green run must not carry a red mark from
-        # the attempt that led to the nudge.
-        if: env.FORCE_NUDGE != 'true'
-        continue-on-error: true
+      - name: Wait for Community Cloud to apply the change, and report
+        # Twenty minutes catches the prompt case, which today was under four
+        # minutes, and gives up before the runner is wasted on the slow case,
+        # which today ran to two hours and needs no help. Warning mode, so a
+        # change still unapplied at the end is a warning on this run and a
+        # pass, and an app that is down is a failure. The schedule carries
+        # the warning from here and escalates only past the grace.
         run: |
-          set -uo pipefail
-          code=0
           python3 scripts/keep_streamlit_awake.py \
             --apps .github/streamlit-apps.txt \
             --registry deployed-registry.py \
-            --verify-tools --soft-annotations \
+            --verify-tools --tools-as-warnings \
+            --pass-budget "$PASS_BUDGET_SECONDS" \
             --expect-build "${{ steps.registry.outputs.sha }}" \
-            --retry-until-current 360 --retry-every 60 \
-            --shots deploy-evidence-first || code=$?
-          # The nudge must know whether this failed because the deploy is
-          # stale, which it can fix, or because the app is down, which it
-          # cannot. The summary file says which.
-          python3 - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          try:
-              app = json.load(open("keepalive-summary.json"))["apps"][0]
-              print(f"status={app['deploy_status']}")
-              print(f"up={'true' if app['up'] else 'false'}")
-          except Exception:
-              print("status=UNKNOWN")
-              print("up=false")
-          PY
-          exit "$code"
-
-      - name: Nudge Community Cloud with a dependency file change
-        id: nudge
-        if: >-
-          env.FORCE_NUDGE == 'true'
-          || (steps.first.outcome == 'failure' && steps.first.outputs.up == 'true')
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Stamp the branch head as it is now, not as this job saw it at
-          # checkout. If somebody pushed meanwhile, their push starts its own
-          # run of this job, which owns the question from here.
-          git fetch origin "$DEPLOY_BRANCH"
-          git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
-          parent="$(git rev-parse HEAD)"
-
-          # A stamp younger than fifteen minutes is a redeploy still building.
-          # Stamping again would restart that build and lengthen the outage,
-          # which is what a run queued behind a nudging run would otherwise do.
-          if git log -1 --format=%s HEAD | grep -q '\[deploy-stamp\]'; then
-            age=$(( $(date +%s) - $(git log -1 --format=%ct HEAD) ))
-            if [ "$age" -lt 900 ] && [ "$FORCE_NUDGE" != "true" ]; then
-              echo "sha=$parent" >> "$GITHUB_OUTPUT"
-              echo "pushed=true" >> "$GITHUB_OUTPUT"
-              echo "A nudge landed ${age}s ago and its redeploy is still building. Not stamping again, waiting on that one."
-              exit 0
-            fi
-          fi
-
-          python3 scripts/deploy_stamp.py "$(git rev-parse --short HEAD)" | tee stamp.log
-          grep -q "STAMP RESULT: WRITTEN" stamp.log
-          git add requirements.txt
-          git commit -m "chore(deploy): nudge Community Cloud to apply $(git rev-parse --short "$parent") [deploy-stamp]" \
-                     -m "Community Cloud had not applied the change after six minutes of looking. A dependency file change makes it do a full redeploy. This line installs nothing."
-          if git push origin "$DEPLOY_BRANCH"; then
-            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-            echo "pushed=true" >> "$GITHUB_OUTPUT"
-            echo "Nudged. Community Cloud should now do a full redeploy."
-            exit 0
-          fi
-
-          # Rejected. Either the branch moved, which is fine and somebody
-          # else's run now owns the question, or it did not, which means a
-          # branch rule, the token or the network refused the nudge and the
-          # deploy cannot self heal. Those are different outcomes and were
-          # once reported as the same green one.
-          git fetch origin "$DEPLOY_BRANCH"
-          if [ "$(git rev-parse "origin/$DEPLOY_BRANCH")" = "$parent" ]; then
-            echo "::error::The nudge push to $DEPLOY_BRANCH was rejected and the branch has not moved, so nothing else pushed. A branch rule, the token or the network refused it and the deploy cannot self heal. The git output above says which."
-            exit 1
-          fi
-          echo "pushed=false" >> "$GITHUB_OUTPUT"
-          echo "::warning::$DEPLOY_BRANCH moved to $(git rev-parse --short "origin/$DEPLOY_BRANCH") while this ran. That change starts its own run of this job, which owns the deploy question now."
-
-      - name: Wait again after the nudge
-        id: second
-        if: steps.nudge.outputs.pushed == 'true'
-        run: |
-          set -uo pipefail
-          # A full redeploy restarts the app, and for a minute or two there is
-          # no app to read, only a boot screen. Two attempts with a pause
-          # between them cover that, and each attempt keeps looking at the
-          # tools not yet confirmed for ten minutes before giving up. The
-          # expected build is the stamp commit, which is now the branch head.
-          for attempt in 1 2; do
-            if python3 scripts/keep_streamlit_awake.py \
-                --apps .github/streamlit-apps.txt \
-                --registry deployed-registry.py \
-                --verify-tools \
-                --expect-build "${{ steps.nudge.outputs.sha }}" \
-                --retry-until-current 600 --retry-every 60 \
-                --shots "deploy-evidence-after-nudge-$attempt"; then
-              echo "The live app now serves every registered tool."
-              exit 0
-            fi
-            echo "Attempt $attempt of 2: not current yet, pausing before looking again."
-            sleep 120
-          done
-          echo "::error::The deploy branch was nudged with a dependency change and the live app is still not serving every registered tool. Community Cloud has not redeployed. Run this workflow by hand with force nudge as a last resort, then check share.streamlit.io."
-          exit 1
-
-      - name: Report an app that is down rather than stale
-        # A down app is the wake job's finding, and a nudge would not help
-        # it. Said plainly here too, so this job never goes green having
-        # looked at nothing.
-        if: >-
-          env.FORCE_NUDGE != 'true'
-          && steps.first.outcome == 'failure'
-          && steps.first.outputs.up != 'true'
-        run: |
-          echo "::error::The first look found the app down rather than stale (deploy status ${{ steps.first.outputs.status }}). A nudge would not help. See the wake job for the app itself."
-          exit 1
+            --retry-until-current 1200 --retry-every 60 \
+            --shots deploy-evidence
 
       - name: Keep the evidence
         if: always()
@@ -315,9 +248,7 @@ jobs:
         with:
           name: deploy-evidence-${{ github.run_number }}
           path: |
-            deploy-evidence-first/
-            deploy-evidence-after-nudge-1/
-            deploy-evidence-after-nudge-2/
+            deploy-evidence/
             keepalive-summary.json
           retention-days: 14
           if-no-files-found: ignore

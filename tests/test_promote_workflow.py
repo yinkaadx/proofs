@@ -267,7 +267,7 @@ def test_the_deploy_verdict_is_handed_to_keep_awake_after_the_merge():
     # A push made with GITHUB_TOKEN does not trigger other workflows, so
     # keep-awake.yml will not fire for the merge push. A workflow_dispatch
     # made with the same token does, and keep-awake.yml's deploy-current job
-    # runs on a dispatch from the deploy branch, waits, nudges and decides.
+    # runs on a dispatch from the deploy branch, waits, and reports.
     data = load()
     merge = index_of(data, "--no-ff")
     handover = index_of(data, "gh workflow run keep-awake.yml")
@@ -285,8 +285,8 @@ def test_the_deploy_verdict_is_handed_to_keep_awake_after_the_merge():
 
 def test_promotion_no_longer_probes_the_app_itself():
     # One place decides whether a deploy landed, and it is keep-awake.yml.
-    # A second prober here, without the nudge, was one failure email per
-    # promotion that Community Cloud was slow on, telling the owner to reboot.
+    # A second prober here was one failure email per promotion that
+    # Community Cloud was slow on, telling the owner to reboot.
     data = load()
     for script in runs(data):
         assert "keep_streamlit_awake.py" not in script, (
@@ -309,7 +309,11 @@ def test_the_receiving_job_runs_on_a_dispatch_from_the_deploy_branch():
     assert f"github.ref_name == '{DEPLOY_BRANCH}'" in condition
     scripts = " ".join(str(step.get("run", "")) for step in job["steps"])
     assert "keep_streamlit_awake.py" in scripts
-    assert "::error::" in scripts and "exit 1" in scripts
+    assert "--verify-tools" in scripts
+    # The prober's own exit code is the step's: an app that is down fails
+    # the job, and a change not yet applied is a warning, on purpose. See the
+    # workflow's header comment for the measurement behind that.
+    assert "--tools-as-warnings" in scripts
 
 
 def test_two_session_branches_cannot_race_a_merge():

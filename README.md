@@ -19,31 +19,32 @@ becomes a page inside it and goes live on the next push.
 Changing the entry file path or the branch means recreating the app, so both
 stay as they are. Adding tools never touches either.
 
-In practice Community Cloud applies a push late, sometimes by an hour, and
-sometimes not until the next push happens to land. Its documentation names one
-change it never ignores: a dependency file change forces a full redeploy. So
-`keep-awake.yml` has a `deploy-current` job that runs once for every change
-to the deploy branch, whether pushed by hand or promoted from a session branch
-by `promote-to-deploy.yml` (which hands over with a `workflow_dispatch`,
-because a push made with the Actions token starts no workflow). It waits six
-minutes for the change to appear on the live app, and if it has not, rewrites
-the first line of `requirements.txt` (the deploy stamp, written by
-`scripts/deploy_stamp.py`), commits it as `github-actions[bot]` and pushes.
-Community Cloud then does a full redeploy. The job fails once, on that run,
-only if the app is still stale after that.
+In practice Community Cloud applies a push on its own, between four minutes
+and about two hours later, with the app awake throughout. Measured on 16
+September 2026 across a day of pushes. Nothing pushed from here makes that
+faster: its documentation says a dependency file change forces a full
+redeploy, so that was tried twice as an automatic nudge, and neither change
+was applied within forty minutes. The only lever that is not a push is the
+Reboot button on share.streamlit.io, and it has no API.
 
-If your next push is rejected as not a fast forward, a stamp landed:
-`git pull --rebase origin claude/kind-feynman-489x72` and push again. The
-stamp is line 1 of `requirements.txt` and nothing else edits line 1, so the
-rebase is clean even when your own commit adds a requirement at the bottom.
+`keep-awake.yml` is honest about that. Its `deploy-current` job runs once for
+every change to the deploy branch, whether pushed by hand or promoted from a
+session branch by `promote-to-deploy.yml` (which hands over with a
+`workflow_dispatch`, because a push made with the Actions token starts no
+workflow). It waits twenty minutes for the change to appear on the live app
+and reports, as a warning if it has not. The only failure it can send is an
+app that is down.
 
-The three hourly wake never fails on a stale deploy. It reports one as a
-warning on the run and in the job summary. It fails only when the app is
-down, or when every registered tool is missing, which is a broken build
-rather than an old one.
-
-To force a redeploy by hand, run `keep-awake.yml` from the Actions tab on
-the deploy branch with "force nudge" ticked. That is the reboot button.
+The three hourly wake fails only when the app is down, when every registered
+tool is missing (a broken build, not an old one), or when a change has sat
+positively unapplied for more than three hours, which is longer than
+Community Cloud has ever taken here and means the deploy is stuck. That last
+case is the only email about deploys you will get, it repeats every three
+hours until someone acts, and the act is Reboot on share.streamlit.io. A tool
+page that merely could not be read, a page that painted nothing in time, a
+pass that ran out of its time budget, or a build label on no known commit of
+the branch never escalates: each is the prober failing to look, not the
+deploy failing to land.
 
 ## Why a hub
 
@@ -252,8 +253,8 @@ Adding a future app to the guarantee is one line in
 `.github/streamlit-apps.txt`. Nothing else changes.
 
 Two limits worth knowing. GitHub only runs scheduled workflows from the
-default branch, so the cron fires from `main`; pushes to any branch also
-trigger it. And GitHub disables scheduled workflows in a repository with no
+default branch, which here is the deploy branch itself, so the cron fires
+from `claude/kind-feynman-489x72`; pushes to any branch also trigger it. And GitHub disables scheduled workflows in a repository with no
 commits for 60 days, so a repository left completely idle for two months needs
 one commit to re arm the schedule.
 
