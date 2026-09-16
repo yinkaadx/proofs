@@ -68,6 +68,7 @@ def all_tools() -> list[Tool]:
     from tools.saas_multitenant_pg_console.page import render as saas_multitenant_pg_console
     from tools.core_web_vitals_optimizer_console.page import render as core_web_vitals_optimizer_console
     from tools.irish_wine_distribution_console.page import render as irish_wine_distribution_console
+    from tools.toh_systems_launch_console.page import render as toh_systems_launch_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -453,6 +454,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Drinks wholesale and distribution",
             render=irish_wine_distribution_console,
+        ),
+        Tool(
+            key="toh-systems-launch-console",
+            title="TOH Systems & Commerce Launch Console",
+            icon="\U0001F9ED",
+            tagline=(
+                "System of record architecture map, stale data prevention "
+                "dashboard, and supervised customer care agent pilot."
+            ),
+            audience="Commerce and operations launch",
+            render=toh_systems_launch_console,
         ),
     ] + [
         Tool(
