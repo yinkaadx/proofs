@@ -64,6 +64,7 @@ def all_tools() -> list[Tool]:
     from tools.sports_betting_algo_console.page import render as sports_betting_algo_console
     from tools.megaport_bgp_rtbh_console.page import render as megaport_bgp_rtbh_console
     from tools.brokerage_qa_workflow_console.page import render as brokerage_qa_workflow_console
+    from tools.appsec_threat_modeling_console.page import render as appsec_threat_modeling_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -405,6 +406,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Real estate operations and QA",
             render=brokerage_qa_workflow_console,
+        ),
+        Tool(
+            key="appsec-threat-modeling-console",
+            title="AppSec Threat Modeling & Research Console",
+            icon="\U0001F3AF",
+            tagline=(
+                "Application security vulnerability analyzer, threat modeling "
+                "evaluator, and product recommendation translator."
+            ),
+            audience="Application security and product",
+            render=appsec_threat_modeling_console,
         ),
     ] + [
         Tool(

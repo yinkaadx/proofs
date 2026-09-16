@@ -43,6 +43,16 @@ SEARCHED = {".py", ".md", ".txt", ".yml", ".yaml", ".toml", ".html"}
 # and scripts and workflows included, has to name the one real host.
 FIXTURE_FILE = "tests/test_keep_streamlit_awake.py"
 
+# A second exemption, for a different reason, also named. CANONICAL_MEMORY.md is
+# the portfolio registry: it lists the 42 separately deployed Streamlit apps
+# that are not this hub. Those hostnames are correct, they are simply other
+# applications. The guard's real question is narrower than "does any other
+# hostname appear anywhere", and pretending otherwise would have meant deleting
+# a registry to keep a test green. The checks below hold this file to the part
+# that actually matters: it must name the hub by the canonical host, and no
+# Toolbench tool path may hang off any other host inside it.
+REGISTRY_FILE = "CANONICAL_MEMORY.md"
+
 failures: list[str] = []
 checks = 0
 
@@ -64,7 +74,7 @@ def searchable_files() -> list[Path]:
             continue
         if any(part in IGNORED for part in path.parts):
             continue
-        if path.relative_to(ROOT).as_posix() == FIXTURE_FILE:
+        if path.relative_to(ROOT).as_posix() in (FIXTURE_FILE, REGISTRY_FILE):
             continue
         found.append(path)
     return found
@@ -114,6 +124,25 @@ expect(base in prober,
 # The exemption has to stay an exemption for the stated reason, not become a
 # hiding place. The fixture file may invent hostnames; it may not become the
 # place a real second deployment is recorded.
+registry = (ROOT / REGISTRY_FILE).read_text(encoding="utf-8")
+expect(base in registry,
+       "the portfolio registry names the hub by its canonical hostname")
+
+# The exemption covers other applications, not other spellings of this one. A
+# tool key appearing as a path under any other host is exactly the mistake this
+# suite exists to catch, registry file or not.
+from tools.registry import all_tools  # noqa: E402
+
+stray = sorted({
+    f"{host}/{tool.key}"
+    for host in HOSTNAME.findall(registry) if host != base
+    for tool in all_tools()
+    if f"{host}/{tool.key}" in registry
+})
+expect(not stray,
+       f"no Toolbench tool path hangs off another host in the registry "
+       f"(found {stray})")
+
 fixtures = (ROOT / FIXTURE_FILE).read_text(encoding="utf-8")
 invented = {host for host in HOSTNAME.findall(fixtures) if host != base}
 expect(all(len(host.split("//")[1].split(".")[0]) <= 4 for host in invented),
