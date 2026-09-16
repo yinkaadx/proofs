@@ -67,6 +67,7 @@ def all_tools() -> list[Tool]:
     from tools.appsec_threat_modeling_console.page import render as appsec_threat_modeling_console
     from tools.saas_multitenant_pg_console.page import render as saas_multitenant_pg_console
     from tools.core_web_vitals_optimizer_console.page import render as core_web_vitals_optimizer_console
+    from tools.irish_wine_distribution_console.page import render as irish_wine_distribution_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -441,6 +442,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Web performance and SEO",
             render=core_web_vitals_optimizer_console,
+        ),
+        Tool(
+            key="irish-wine-distribution-console",
+            title="Irish Wine Wholesale Operating Console",
+            icon="\U0001F377",
+            tagline=(
+                "Bonded stock tracking, Irish excise duty and VAT calculator, "
+                "multi tier pricing engine, and 3PL dispatch formatter."
+            ),
+            audience="Drinks wholesale and distribution",
+            render=irish_wine_distribution_console,
         ),
     ] + [
         Tool(
