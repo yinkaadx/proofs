@@ -69,6 +69,7 @@ def all_tools() -> list[Tool]:
     from tools.core_web_vitals_optimizer_console.page import render as core_web_vitals_optimizer_console
     from tools.irish_wine_distribution_console.page import render as irish_wine_distribution_console
     from tools.toh_systems_launch_console.page import render as toh_systems_launch_console
+    from tools.sgtm_claude_agent_console.page import render as sgtm_claude_agent_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -465,6 +466,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Commerce and operations launch",
             render=toh_systems_launch_console,
+        ),
+        Tool(
+            key="sgtm-claude-agent-console",
+            title="Server Side Tracking & Claude Agent Console",
+            icon="\U0001F4E1",
+            tagline=(
+                "Stape sGTM event router, Meta CAPI deduplication validator, "
+                "Consent Mode v2 tester, and Claude skill manifest generator."
+            ),
+            audience="Analytics and marketing engineering",
+            render=sgtm_claude_agent_console,
         ),
     ] + [
         Tool(
