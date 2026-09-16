@@ -60,6 +60,7 @@ def all_tools() -> list[Tool]:
     from tools.creator_membership_architecture_console.page import render as creator_membership_architecture_console
     from tools.cloudflare_r2_transfer_optimizer.page import render as cloudflare_r2_transfer_optimizer
     from tools.erpnext_lab_inventory_console.page import render as erpnext_lab_inventory_console
+    from tools.supply_chain_qa_console.page import render as supply_chain_qa_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -356,6 +357,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Laboratory operations and ERP",
             render=erpnext_lab_inventory_console,
+        ),
+        Tool(
+            key="supply-chain-qa-console",
+            title="Supply Chain QA & Regression Console",
+            icon="\U0001F4CB",
+            tagline=(
+                "Supply chain planning test case matrix, regression defect "
+                "generator, and test execution tracker."
+            ),
+            audience="QA and supply chain planning",
+            render=supply_chain_qa_console,
         ),
     ] + [
         Tool(
