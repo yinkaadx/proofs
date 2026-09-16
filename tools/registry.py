@@ -61,6 +61,7 @@ def all_tools() -> list[Tool]:
     from tools.cloudflare_r2_transfer_optimizer.page import render as cloudflare_r2_transfer_optimizer
     from tools.erpnext_lab_inventory_console.page import render as erpnext_lab_inventory_console
     from tools.supply_chain_qa_console.page import render as supply_chain_qa_console
+    from tools.sports_betting_algo_console.page import render as sports_betting_algo_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -368,6 +369,18 @@ def all_tools() -> list[Tool]:
             ),
             audience="QA and supply chain planning",
             render=supply_chain_qa_console,
+        ),
+        Tool(
+            key="sports-betting-algo-console",
+            title="Sports Betting Algorithm & Edge Console",
+            icon="\U0001F3B2",
+            tagline=(
+                "Sports betting quantitative edge model, referee bias factor "
+                "analysis, ensemble meta predictor, and Kelly backtesting "
+                "engine."
+            ),
+            audience="Quantitative modelling",
+            render=sports_betting_algo_console,
         ),
     ] + [
         Tool(
