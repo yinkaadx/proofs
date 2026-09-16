@@ -66,6 +66,7 @@ def all_tools() -> list[Tool]:
     from tools.brokerage_qa_workflow_console.page import render as brokerage_qa_workflow_console
     from tools.appsec_threat_modeling_console.page import render as appsec_threat_modeling_console
     from tools.saas_multitenant_pg_console.page import render as saas_multitenant_pg_console
+    from tools.core_web_vitals_optimizer_console.page import render as core_web_vitals_optimizer_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -429,6 +430,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Platform and database engineering",
             render=saas_multitenant_pg_console,
+        ),
+        Tool(
+            key="core-web-vitals-optimizer-console",
+            title="Core Web Vitals & Speed Optimizer Console",
+            icon="\U0001F6A6",
+            tagline=(
+                "Core Web Vitals diagnostic engine, INP and LCP latency "
+                "analyzer, and before vs after mobile score benchmark."
+            ),
+            audience="Web performance and SEO",
+            render=core_web_vitals_optimizer_console,
         ),
     ] + [
         Tool(
