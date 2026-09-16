@@ -63,6 +63,7 @@ def all_tools() -> list[Tool]:
     from tools.supply_chain_qa_console.page import render as supply_chain_qa_console
     from tools.sports_betting_algo_console.page import render as sports_betting_algo_console
     from tools.megaport_bgp_rtbh_console.page import render as megaport_bgp_rtbh_console
+    from tools.brokerage_qa_workflow_console.page import render as brokerage_qa_workflow_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -393,6 +394,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Network operations",
             render=megaport_bgp_rtbh_console,
+        ),
+        Tool(
+            key="brokerage-qa-workflow-console",
+            title="Real Estate Brokerage QA & Workflow Console",
+            icon="\U0001F3D8",
+            tagline=(
+                "US real estate brokerage workflow validator, Marker.io "
+                "defect report generator, and transaction compliance auditor."
+            ),
+            audience="Real estate operations and QA",
+            render=brokerage_qa_workflow_console,
         ),
     ] + [
         Tool(
