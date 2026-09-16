@@ -14,10 +14,36 @@ becomes a page inside it and goes live on the next push.
 | Host | Streamlit Community Cloud, signed in with GitHub |
 | Entry file | `streamlit_app.py` at the repository root |
 | Deploy branch | `claude/kind-feynman-489x72` |
-| Redeploy | Automatic on every push to that branch |
+| Redeploy | Automatic on every push to that branch, in principle |
 
 Changing the entry file path or the branch means recreating the app, so both
 stay as they are. Adding tools never touches either.
+
+In practice Community Cloud applies a push late, sometimes by an hour, and
+sometimes not until the next push happens to land. Its documentation names one
+change it never ignores: a dependency file change forces a full redeploy. So
+`keep-awake.yml` has a `deploy-current` job that runs once for every change
+to the deploy branch, whether pushed by hand or promoted from a session branch
+by `promote-to-deploy.yml` (which hands over with a `workflow_dispatch`,
+because a push made with the Actions token starts no workflow). It waits six
+minutes for the change to appear on the live app, and if it has not, rewrites
+the first line of `requirements.txt` (the deploy stamp, written by
+`scripts/deploy_stamp.py`), commits it as `github-actions[bot]` and pushes.
+Community Cloud then does a full redeploy. The job fails once, on that run,
+only if the app is still stale after that.
+
+If your next push is rejected as not a fast forward, a stamp landed:
+`git pull --rebase origin claude/kind-feynman-489x72` and push again. The
+stamp is line 1 of `requirements.txt` and nothing else edits line 1, so the
+rebase is clean even when your own commit adds a requirement at the bottom.
+
+The three hourly wake never fails on a stale deploy. It reports one as a
+warning on the run and in the job summary. It fails only when the app is
+down, or when every registered tool is missing, which is a broken build
+rather than an old one.
+
+To force a redeploy by hand, run `keep-awake.yml` from the Actions tab on
+the deploy branch with "force nudge" ticked. That is the reboot button.
 
 ## Why a hub
 
@@ -43,9 +69,13 @@ fallback, if a tool's title is missing, or if the hub is serving an older commit
 than the checkout. It also checks that a deliberately invalid path still reports
 not found, so the suite cannot pass vacuously.
 
-The hub prints the commit it is running in its sidebar, as `build <sha>`. If
-that does not match the commit you expect, the deployment is stale and needs a
-reboot, not a fix.
+The hub prints the commit it is running in its sidebar, as `build <sha>`. The
+keep awake prober reads that label and prints it beside its verdict, so a
+stale deploy is reported as "live app reports build d611e14, deploy branch is
+at c06bbb6" rather than as a bare missing tool. A mismatch is treated as
+stale even when every tool key resolves, because a push that changes an
+existing tool adds no key. A match proves nothing on its own, since the
+checkout updates before the process reloads, so only the mismatch is acted on.
 
 ## Tools
 

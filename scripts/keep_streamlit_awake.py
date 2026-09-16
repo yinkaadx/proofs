@@ -23,21 +23,54 @@ What one run does, per app:
 Pure logic sits at the top with no browser import, so it is unit testable on
 its own. Playwright is imported only inside the function that drives a browser.
 
+Two questions, two exit codes. "Is the app awake" is what the three hourly
+schedule exists to answer, and its failure means the app is down. "Is the live
+app current with the deploy branch" is a different question with a different
+owner, Community Cloud's deploy path, which is known to apply a push late or
+not at all. Answering the second question with the first question's exit code
+produced a failure email every three hours for a condition that was already
+known, was not a sleeping app, and did not change between runs. Alert fatigue
+is how the next real outage gets deleted unread.
+
+So the tool check has two modes:
+
+  strict (default)     a stale or unproven deploy fails the run. Used right
+                       after a push, once, with retries, by the deploy-current
+                       job. One push, one verdict, at most one email.
+  --tools-as-warnings  a stale deploy is reported as a warning annotation and
+                       in the job summary, and the run passes as long as the
+                       app is awake and serving. Used by the three hourly wake.
+                       A stale deploy is announced once, by the strict run on
+                       the push that caused it, and never re announced.
+
+Two states that are not "stale". An app whose every registered tool falls
+back to the landing page is not running an old build, it is not serving tools
+at all, and that is reported as down in both modes. An app whose sidebar
+reports a build that is not the deploy branch head is stale even when every
+tool key resolves, because a push that changes an existing tool adds no key.
+
 Run:
     python3 scripts/keep_streamlit_awake.py
     python3 scripts/keep_streamlit_awake.py --verify-tools
-    python3 scripts/keep_streamlit_awake.py --apps .github/streamlit-apps.txt
+    python3 scripts/keep_streamlit_awake.py --verify-tools --tools-as-warnings
+    python3 scripts/keep_streamlit_awake.py --verify-tools \
+        --retry-until-current 480 --retry-every 60
 
 Pass marker: final line is exactly "KEEPALIVE RESULT: PASS <n>/<n> apps awake"
-and exit code 0. Fail marker: any line starting "FAIL", plus exit code 1.
+and exit code 0. Fail marker: any line starting "FAIL", plus exit code 1. The
+line before the blank line that precedes the result is always
+"DEPLOY STATUS: <CURRENT|STALE|UNPROVEN|UNCHECKED> ..." when tools were asked
+about, so the deploy question can be parsed on its own.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
+import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
@@ -65,6 +98,11 @@ AWAKE_SELECTOR = '[data-testid="stApp"], .stApp'
 # between one tool and another. The sidebar lists every registered tool on
 # every page, so reading the whole body proves nothing about which page ran.
 MAIN_SELECTOR = '[data-testid="stMain"]'
+# The sidebar carries the running build, as "build <sha>", which is the one
+# fact that turns "a tool is missing" into "the app is running d611e14 and the
+# branch is at c06bbb6". The prober reads it rather than inferring it.
+SIDEBAR_SELECTOR = '[data-testid="stSidebar"]'
+BUILD_LABEL = re.compile(r"\bbuild ([0-9a-f]{7,40}|unknown)\b")
 
 # Timeouts in milliseconds. A cold boot pulls the environment and can genuinely
 # take minutes, so the wake wait is deliberately generous.
@@ -107,6 +145,16 @@ class AppResult:
     # so the two lists below carry no weight either way.
     tools_requested: int = 0
     error: str = ""
+    # What the running app says it is, read from its own sidebar. Empty when it
+    # could not be read, "unknown" when the app itself does not know.
+    live_build: str = ""
+    # How many extra passes the tool check made waiting for the deploy to
+    # catch up. Zero on a single look.
+    retries: int = 0
+    # The commit the deploy branch is at, when the caller knows it. A live
+    # build that is neither this nor "unknown" is a checkout that has not been
+    # updated, which is staleness with no missing tool to show for it.
+    expected_build: str = ""
 
     @property
     def verified(self) -> bool:
@@ -122,9 +170,43 @@ class AppResult:
                     and not self.missing_tools)
 
     @property
+    def build_mismatch(self) -> bool:
+        """The sidebar names a real commit and it is not the deploy head.
+
+        A match proves nothing: the label is read from the checkout at render
+        time and a git pull updates the checkout before the process reloads.
+        A mismatch is proof, because an old checkout cannot be running new
+        code. So only the mismatch is ever acted on.
+        """
+        live = self.live_build
+        return bool(self.expected_build and live and live != "unknown"
+                    and not self.expected_build.startswith(live))
+
+    @property
     def ok(self) -> bool:
         return (self.awake and not self.error and not self.missing_tools
-                and self.verified)
+                and self.verified and not self.build_mismatch)
+
+    @property
+    def up(self) -> bool:
+        """The question the schedule asks: is the app awake and serving."""
+        return self.awake and not self.error
+
+    @property
+    def deploy_status(self) -> str:
+        """CURRENT, STALE, UNPROVEN or UNCHECKED. Never a boolean.
+
+        UNCHECKED covers both "not asked" and "asked but never got to look",
+        because an app that never rendered has told the prober nothing about
+        its deploy, and reporting CURRENT there was a lie the JSON carried.
+        """
+        if not self.tools_requested or not self.up:
+            return "UNCHECKED"
+        if self.missing_tools or self.build_mismatch:
+            return "STALE"
+        if self.unchecked_tools:
+            return "UNPROVEN"
+        return "CURRENT"
 
 
 def normalize_app_url(value: str) -> str:
@@ -205,56 +287,125 @@ def tool_is_live(main_text: str, home_fingerprint: str) -> bool:
     return signature != home_fingerprint
 
 
-def verdict(results: list[AppResult]) -> tuple[int, list[str]]:
-    """Turn results into the exit code and the lines a CI log is parsed for."""
+def parse_build_label(text: str) -> str:
+    """The sha the app prints in its sidebar, or "" when there is none."""
+    match = BUILD_LABEL.search(str(text or ""))
+    return match.group(1) if match else ""
+
+
+def _tool_problem(result: AppResult) -> str:
+    """The sentence that says what is wrong with the deploy, or ""."""
+    if result.missing_tools:
+        text = ("registered tools missing from the live app: "
+                + ", ".join(result.missing_tools))
+        if result.unchecked_tools:
+            # Still named, so the reader knows how much of the deploy was
+            # actually examined rather than only what was found wanting.
+            text += (f"; and {len(result.unchecked_tools)} tool page(s) could "
+                     f"not be read: " + ", ".join(result.unchecked_tools))
+        return text
+    if result.build_mismatch:
+        return (f"the live app reports build {result.live_build}, but the "
+                f"deploy branch is at {result.expected_build[:7]}, so the push "
+                f"has not been applied even though every tool key resolves")
+    if result.unproven:
+        # Deliberately not "stale" and deliberately not a pass. The prober
+        # failed to look, so the only honest report is that the deploy is
+        # unproven, and a job asked to prove it must not exit 0 having proved
+        # nothing.
+        confirmed = result.tools_requested - len(result.unchecked_tools)
+        return (f"could not read {len(result.unchecked_tools)} of "
+                f"{result.tools_requested} tool page(s), so the deploy is "
+                f"UNPROVEN rather than stale ({confirmed} confirmed): "
+                + ", ".join(result.unchecked_tools))
+    return ""
+
+
+def _build_note(result: AppResult) -> str:
+    """The label, stated. Never "matches": a match proves nothing."""
+    if not result.live_build or result.build_mismatch:
+        return ""
+    return f" (live app reports build {result.live_build})"
+
+
+_STATUS_RANK = {"UNCHECKED": 0, "CURRENT": 1, "UNPROVEN": 2, "STALE": 3}
+
+
+def deploy_status_line(results: list[AppResult]) -> str:
+    """One parseable line about the deploy, separate from the wake verdict."""
+    asked = [r for r in results if r.tools_requested]
+    if not asked:
+        return "DEPLOY STATUS: UNCHECKED, tool verification was not requested"
+    worst = max(asked, key=lambda r: _STATUS_RANK[r.deploy_status])
+    status = worst.deploy_status
+    if status == "UNCHECKED":
+        detail = "the app never rendered, so nothing was checked"
+    elif status == "CURRENT":
+        detail = ", ".join(f"all {r.tools_requested} tools confirmed"
+                           for r in asked)
+    else:
+        detail = "; ".join(_tool_problem(r) for r in asked if _tool_problem(r))
+    retried = max((r.retries for r in asked), default=0)
+    if retried:
+        detail += f" (after {retried} retr{'y' if retried == 1 else 'ies'})"
+    return f"DEPLOY STATUS: {status}, {detail}{_build_note(worst)}"
+
+
+def verdict(results: list[AppResult],
+            stale_is_failure: bool = True) -> tuple[int, list[str]]:
+    """Turn results into the exit code and the lines a CI log is parsed for.
+
+    stale_is_failure True is the strict mode: a stale or unproven deploy fails
+    the run. False is the warning mode for the schedule, where the app being
+    up and serving is the pass and the deploy is reported without deciding the
+    exit code. There is deliberately no age based escalation in warning mode.
+    One was tried, measured from the deploy head's commit time, and it turned
+    a single flaky page read on a quiet branch back into a failure email every
+    three hours, which is the condition this mode exists to remove. A stale
+    deploy is announced once, by the strict run on the push that caused it.
+    """
     lines: list[str] = []
+    # Three different failures, counted apart, because saying "not awake"
+    # about a running app sends whoever reads this log to the wrong place.
+    down = stale = unproven = 0
     for result in results:
+        problem = _tool_problem(result)
+        state = "woken from sleep" if result.was_asleep else "already awake"
         if result.ok:
-            state = "woken from sleep" if result.was_asleep else "already awake"
             checked = (f", all {result.tools_requested} tools confirmed"
                        if result.tools_requested else "")
             lines.append(f"  ok   {result.url} {state}{checked}")
-        else:
-            if result.error:
-                reason = result.error
-            elif result.missing_tools:
-                reason = ("registered tools missing from the live app: "
-                          + ", ".join(result.missing_tools))
-            elif result.unproven:
-                # Deliberately not "stale" and deliberately not a pass. The
-                # prober failed to look, so the only honest report is that the
-                # deploy is unproven, and a job asked to prove it must not
-                # exit 0 having proved nothing.
-                confirmed = result.tools_requested - len(result.unchecked_tools)
-                reason = (f"could not read {len(result.unchecked_tools)} of "
-                          f"{result.tools_requested} tool page(s), so the "
-                          f"deploy is UNPROVEN rather than stale "
-                          f"({confirmed} confirmed): "
-                          + ", ".join(result.unchecked_tools))
+        elif not result.up:
+            lines.append(f"  FAIL {result.url} "
+                         f"{result.error or 'the app never rendered'}")
+            down += 1
+        elif stale_is_failure:
+            lines.append(f"  FAIL {result.url} {problem}")
+            if result.unproven:
+                unproven += 1
             else:
-                reason = "the app never rendered"
-            lines.append(f"  FAIL {result.url} {reason}")
+                stale += 1
+        else:
+            lines.append(f"  WARN {result.url} {state}, but {problem}")
 
-    passed = len([r for r in results if r.ok])
     total = len(results)
-    if passed != total:
-        # An app that is awake but whose tools could not be read is a different
-        # failure from an app that never came up, and saying "not awake" about
-        # a running app sends whoever reads this log looking in the wrong
-        # place.
-        unproven = len([r for r in results if r.unproven])
-        asleep = total - passed - unproven
+    if any(r.tools_requested for r in results):
+        lines.append(deploy_status_line(results))
+    failures = down + stale + unproven
+    if failures:
         parts = []
-        if asleep:
-            parts.append(f"{asleep} not awake")
+        if down:
+            parts.append(f"{down} not awake")
+        if stale:
+            parts.append(f"{stale} awake but stale")
         if unproven:
             parts.append(f"{unproven} awake but unproven")
         lines.append("")
-        lines.append(f"KEEPALIVE RESULT: FAIL {total - passed} of {total} apps, "
+        lines.append(f"KEEPALIVE RESULT: FAIL {failures} of {total} apps, "
                      + ", ".join(parts))
         return 1, lines
     lines.append("")
-    lines.append(f"KEEPALIVE RESULT: PASS {passed}/{total} apps awake")
+    lines.append(f"KEEPALIVE RESULT: PASS {total}/{total} apps awake")
     return 0, lines
 
 
@@ -384,8 +535,30 @@ def read_main(page, settle_ms: int = 3_500, timeout_ms: int = RESOLVE_TIMEOUT_MS
     return frame.inner_text(MAIN_SELECTOR, timeout=30_000)
 
 
+def read_build_label(page, timeout_ms: int = 15_000) -> str:
+    """What the running app says its build is, from its own sidebar.
+
+    Empty when the sidebar could not be read in time. That is reported as
+    "not read" and never as a mismatch, because a prober that failed to look
+    has learned nothing about the app.
+    """
+    try:
+        frame = wait_for_app_frame(page)
+        frame.wait_for_selector(SIDEBAR_SELECTOR, timeout=timeout_ms)
+        return parse_build_label(frame.inner_text(SIDEBAR_SELECTOR,
+                                                  timeout=timeout_ms))
+    except Exception:                             # noqa: BLE001
+        return ""
+
+
+def _key_of(entry: str) -> str:
+    """The tool key from a "key (reason)" entry in a missing or unchecked list."""
+    return entry.split(" (", 1)[0]
+
+
 def verify_tools(page, app_url: str, tools: list[tuple[str, str]],
-                 home_fingerprint: str) -> tuple[list[str], list[str]]:
+                 home_fingerprint: str,
+                 only: set[str] | None = None) -> tuple[list[str], list[str]]:
     """Confirm every registered tool is actually reachable on the live app.
 
     This is what catches a deploy that never picked up the newest push. A tool
@@ -403,6 +576,12 @@ def verify_tools(page, app_url: str, tools: list[tuple[str, str]],
     missing: list[str] = []
     unchecked: list[str] = []
     for key, _title in tools:
+        # A retry only needs to look again at what was not confirmed. Reading
+        # all thirty tools every pass costs three and a half minutes a pass,
+        # which is most of the wait budget spent re proving what is already
+        # proved.
+        if only is not None and key not in only:
+            continue
         url = tool_url(app_url, key)
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=NAV_TIMEOUT_MS)
@@ -432,8 +611,33 @@ def chromium_executable(explicit: str = "") -> str | None:
     return path or None
 
 
+BROKEN_APP = ("every registered tool fell back to the landing page, so the "
+              "app is not serving tools at all; that is a broken build, not a "
+              "stale one")
+
+
+def _merge_passes(previous_missing: list[str], missing_now: list[str],
+                  unchecked_now: list[str]) -> tuple[list[str], list[str]]:
+    """Fold a retry pass into what is already known.
+
+    A tool proven missing on an earlier pass stays missing until a later pass
+    confirms it live. A timeout on the re read is not a confirmation, and
+    letting it downgrade a proved STALE into an UNPROVEN was a real bug.
+    """
+    proved = {_key_of(entry): entry for entry in previous_missing}
+    unchecked_keys = {_key_of(entry) for entry in unchecked_now}
+    carried = [proved[key] for key in proved if key in unchecked_keys]
+    missing = list(missing_now) + carried
+    unchecked = [entry for entry in unchecked_now
+                 if _key_of(entry) not in proved]
+    return missing, unchecked
+
+
 def run(apps: list[str], tools: list[tuple[str, str]],
-        shots: Path | None, chromium: str = "") -> list[AppResult]:
+        shots: Path | None, chromium: str = "",
+        retry_until_current: float = 0, retry_every: float = 60,
+        expect_build: str = "",
+        sleep=time.sleep, clock=time.monotonic) -> list[AppResult]:
     from playwright.sync_api import sync_playwright   # imported here on purpose
 
     results: list[AppResult] = []
@@ -456,6 +660,7 @@ def run(apps: list[str], tools: list[tuple[str, str]],
             # Recorded before the reads, not after, so a run that fails to read
             # every single page still knows how many it was supposed to prove.
             result.tools_requested = len(tools)
+            result.expected_build = expect_build
             if result.awake and tools:
                 # Take the landing page as it stands right now, so a tool page
                 # is measured against this app rather than a hardcoded string.
@@ -465,8 +670,51 @@ def run(apps: list[str], tools: list[tuple[str, str]],
                     result.error = f"could not read the landing page: {type(exc).__name__}"
                     results.append(result)
                     continue
+                result.live_build = read_build_label(page)
+                print(f"  .    live app reports build "
+                      f"{result.live_build or 'not read'}")
                 result.missing_tools, result.unchecked_tools = verify_tools(
                     page, app, tools, home_fingerprint)
+                # Community Cloud applies a push late, sometimes very late, so
+                # a look taken a minute after the push reports a stale deploy
+                # that is merely a young one. Keep looking, at only the tools
+                # not yet confirmed, until they appear or the budget is spent.
+                deadline = clock() + retry_until_current
+                while ((result.missing_tools or result.unchecked_tools
+                        or result.build_mismatch) and clock() < deadline):
+                    pending = {_key_of(k) for k in result.missing_tools}
+                    pending |= {_key_of(k) for k in result.unchecked_tools}
+                    remaining = max(0.0, deadline - clock())
+                    wait = min(float(retry_every), remaining)
+                    what = (f"{len(pending)} tool(s) not confirmed yet"
+                            if pending else "the live build is behind")
+                    print(f"  .    {what}, looking again in {int(wait)}s "
+                          f"({int(remaining)}s of the wait budget left)")
+                    sleep(wait)
+                    result.retries += 1
+                    if pending:
+                        missing, unchecked = verify_tools(
+                            page, app, tools, home_fingerprint, only=pending)
+                        result.missing_tools, result.unchecked_tools = (
+                            _merge_passes(result.missing_tools, missing,
+                                          unchecked))
+                    else:
+                        # Nothing to re read but the label itself, which only
+                        # refreshes on a navigation.
+                        try:
+                            page.goto(app, wait_until="domcontentloaded",
+                                      timeout=NAV_TIMEOUT_MS)
+                        except Exception:             # noqa: BLE001
+                            pass
+                    # Read after the navigation above, not before it, or the
+                    # label is one pass stale on the very pass that confirms.
+                    result.live_build = read_build_label(page) or result.live_build
+                if tools and len(result.missing_tools) == len(tools):
+                    # A stale deploy is missing the newest tool or two. An app
+                    # missing every one of them is serving no tools: a boot
+                    # failure that renders the landing page, or a traceback
+                    # under the app shell. That is down, in both modes.
+                    result.error = BROKEN_APP
             results.append(result)
             print(f"  .    health endpoint says: {result.health}")
         context.close()
@@ -488,6 +736,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--chromium", default="",
                         help="Path to an existing Chromium binary. Defaults to "
                              "KEEPALIVE_CHROMIUM, then to Playwright's own.")
+    parser.add_argument("--tools-as-warnings", action="store_true",
+                        help="Report a stale or unproven deploy as a warning "
+                             "and pass as long as the app is awake. For the "
+                             "schedule, whose failure must mean the app is "
+                             "down.")
+    parser.add_argument("--soft-annotations", action="store_true",
+                        help="Emit FAIL lines as warning annotations rather "
+                             "than error ones. For a look that is expected to "
+                             "fail and be retried, so a green run does not "
+                             "carry a red mark from its first attempt.")
+    parser.add_argument("--expect-build", default="",
+                        help="The commit the deploy branch is at, to compare "
+                             "against the build the live app reports.")
+    parser.add_argument("--retry-until-current", type=float, default=0,
+                        help="Seconds to keep re checking unconfirmed tools "
+                             "before giving a verdict. 0 looks once.")
+    parser.add_argument("--retry-every", type=float, default=60,
+                        help="Seconds between looks while retrying.")
     args = parser.parse_args(argv)
 
     apps = load_apps(Path(args.apps))
@@ -501,23 +767,63 @@ def main(argv: list[str] | None = None) -> int:
 
     shots = Path(args.shots) if args.shots else None
     print(f"Keeping {len(apps)} app{'' if len(apps) == 1 else 's'} awake.")
-    results = run(apps, tools, shots, args.chromium)
+    results = run(apps, tools, shots, args.chromium,
+                  retry_until_current=args.retry_until_current,
+                  retry_every=args.retry_every,
+                  expect_build=args.expect_build)
 
-    code, lines = verdict(results)
+    code, lines = verdict(results,
+                          stale_is_failure=not args.tools_as_warnings)
     print()
     for line in lines:
         print(line)
+    emit_annotations(lines, soft=args.soft_annotations)
 
     summary = {
+        "expected_build": args.expect_build,
         "apps": [
             {"url": r.url, "was_asleep": r.was_asleep, "awake": r.awake,
              "health": r.health, "missing_tools": r.missing_tools,
-             "unchecked_tools": r.unchecked_tools, "error": r.error}
+             "unchecked_tools": r.unchecked_tools, "error": r.error,
+             "live_build": r.live_build, "expected_build": r.expected_build,
+             "build_mismatch": r.build_mismatch,
+             "deploy_status": r.deploy_status, "retries": r.retries,
+             "up": r.up}
             for r in results
         ]
     }
     Path("keepalive-summary.json").write_text(json.dumps(summary, indent=2))
+    write_step_summary(lines)
     return code
+
+
+def emit_annotations(lines: list[str], soft: bool = False) -> None:
+    """Surface WARN and FAIL lines where GitHub shows them on the run page.
+
+    A warning annotation is visible without opening the log and does not send
+    a failure email, which is exactly the standing a known stale deploy should
+    have between one push and the next.
+    """
+    for line in lines:
+        text = line.strip()
+        if text.startswith("WARN "):
+            print(f"::warning::{text[5:]}")
+        elif text.startswith("FAIL "):
+            print(f"::{'warning' if soft else 'error'}::{text[5:]}")
+
+
+def write_step_summary(lines: list[str]) -> None:
+    """The verdict in the job summary, so nobody has to read the log."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write("### Keep awake\n\n```\n")
+            handle.write("\n".join(line for line in lines if line.strip()))
+            handle.write("\n```\n")
+    except OSError:
+        pass
 
 
 if __name__ == "__main__":

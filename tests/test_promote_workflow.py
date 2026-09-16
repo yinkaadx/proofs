@@ -126,11 +126,14 @@ def test_main_cannot_trigger_a_merge():
 # Permissions
 # ---------------------------------------------------------------------------
 
-def test_permissions_are_exactly_contents_write():
-    # Write to the repository is the whole job. Anything broader hands a token
-    # that can do more than merge to every push on every session branch.
+def test_permissions_are_exactly_contents_and_actions_write():
+    # Write to the repository is the merge. Write to actions is the one
+    # workflow_dispatch that hands the deploy verdict to keep-awake.yml, since
+    # a push made with the token starts no workflow and a dispatch does.
+    # Anything broader hands a token that can do more than that to every push
+    # on every session branch.
     data = load()
-    assert data["permissions"] == {"contents": "write"}, (
+    assert data["permissions"] == {"contents": "write", "actions": "write"}, (
         f"unexpected permissions: {data['permissions']}")
 
 
@@ -260,34 +263,53 @@ def test_an_already_merged_branch_does_nothing():
 # Waking the app, because a push with GITHUB_TOKEN triggers nothing
 # ---------------------------------------------------------------------------
 
-def test_the_prober_runs_after_the_merge():
+def test_the_deploy_verdict_is_handed_to_keep_awake_after_the_merge():
     # A push made with GITHUB_TOKEN does not trigger other workflows, so
-    # keep-awake.yml will not fire for this push and the merged tool would sit
-    # undeployed until something else woke the app.
+    # keep-awake.yml will not fire for the merge push. A workflow_dispatch
+    # made with the same token does, and keep-awake.yml's deploy-current job
+    # runs on a dispatch from the deploy branch, waits, nudges and decides.
     data = load()
     merge = index_of(data, "--no-ff")
-    wake = index_of(data, "keep_streamlit_awake.py")
-    assert wake > merge, f"the prober is at {wake}, before the merge at {merge}"
-    prober = runs(data)[wake]
-    assert "--verify-tools" in prober, "the prober does not check the tools are live"
-    assert "playwright" in prober, "the prober has no browser to drive"
+    handover = index_of(data, "gh workflow run keep-awake.yml")
+    assert handover > merge, (
+        f"the handover is at {handover}, before the merge at {merge}")
+    script = runs(data)[handover]
+    assert f'--ref "${{DEPLOY_BRANCH}}"' in script, (
+        "the dispatch must run keep-awake.yml on the deploy branch, where its "
+        "deploy-current job is allowed to run")
+    assert "set -euo pipefail" in script, "a failed dispatch would go unnoticed"
+    step = steps(data)[handover]
+    assert step.get("continue-on-error") is not True
+    assert "GH_TOKEN" in step.get("env", {}), "gh has no token to dispatch with"
 
 
-def test_a_deploy_that_never_landed_is_reported_as_a_failure():
-    # This step used to carry continue-on-error and swallow its own result, so
-    # a tool could be merged, tested and green while the live app served an
-    # older build and nobody was told. That is the exact failure the owner
-    # noticed by hand, so it is now a red job rather than a quiet one.
+def test_promotion_no_longer_probes_the_app_itself():
+    # One place decides whether a deploy landed, and it is keep-awake.yml.
+    # A second prober here, without the nudge, was one failure email per
+    # promotion that Community Cloud was slow on, telling the owner to reboot.
     data = load()
-    wake = steps(data)[index_of(data, "keep_streamlit_awake.py")]
-    assert wake.get("continue-on-error") is not True, (
-        "the deploy confirmation swallows its own result again")
-    script = str(wake.get("run", ""))
-    assert "::error::" in script, "a stale deploy produces no error annotation"
-    assert "exit 1" in script, "a stale deploy does not fail the job"
-    # And it must retry, or it would call a merge stale one second after making it.
-    assert "for attempt in" in script, "the deploy check does not retry"
-    assert "sleep 60" in script, "the deploy check retries with no wait between"
+    for script in runs(data):
+        assert "keep_streamlit_awake.py" not in script, (
+            "the promotion probes the live app itself again")
+        assert "Reboot the app" not in script
+
+
+def test_the_receiving_job_runs_on_a_dispatch_from_the_deploy_branch():
+    # The handover only works if the other side accepts it: keep-awake.yml's
+    # deploy-current job must run on workflow_dispatch, on the deploy branch,
+    # and carry the failure the old probe used to carry.
+    import yaml
+    keep_awake = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "keep-awake.yml").read_text())
+    triggers = keep_awake.get("on", keep_awake.get(True))
+    assert "workflow_dispatch" in triggers
+    job = keep_awake["jobs"]["deploy-current"]
+    condition = job["if"]
+    assert "github.event_name != 'schedule'" in condition
+    assert f"github.ref_name == '{DEPLOY_BRANCH}'" in condition
+    scripts = " ".join(str(step.get("run", "")) for step in job["steps"])
+    assert "keep_streamlit_awake.py" in scripts
+    assert "::error::" in scripts and "exit 1" in scripts
 
 
 def test_two_session_branches_cannot_race_a_merge():

@@ -45,6 +45,10 @@ concurrency:
 # nothing else is granted.
 permissions:
   contents: write
+  # To hand the deploy verdict to keep-awake.yml by workflow_dispatch after
+  # the merge. A push made with GITHUB_TOKEN starts no workflow; a dispatch
+  # made with it does.
+  actions: write
 
 env:
   # The branch Streamlit Community Cloud builds the live app from, recorded in
@@ -258,40 +262,28 @@ jobs:
           echo "::error::main could not be fast forwarded to ${DEPLOY_BRANCH}. It has diverged, so nothing was forced. Until main carries keep-awake.yml the three hourly wake does not run at all. Reconcile main by hand."
           exit 1
 
-      - name: Wake the live app and confirm the merge actually deployed
+      - name: Hand the deploy verdict to keep-awake.yml
         # A push made with GITHUB_TOKEN does not trigger other workflows, so
-        # keep-awake.yml will not fire for the push above. Without this the
-        # newly merged tool would sit undeployed until something else happened
-        # to wake the app.
+        # keep-awake.yml's push trigger never sees the merge above. A
+        # workflow_dispatch made with the same token does start a run, and
+        # keep-awake.yml's deploy-current job runs on a dispatch from the
+        # deploy branch: it waits for Community Cloud to apply the merge,
+        # nudges it with a dependency file change if it has not, and fails
+        # once, on that run, if the app is still stale after that.
         #
-        # This step used to swallow its own result and stay green. That is
-        # precisely how a tool sat on the deploy branch, merged and tested,
-        # while the live app served an older build and nobody was told. The
-        # merge cannot be undone from here and should not be, but a deploy
-        # that never landed is a failure and now reads as one.
+        # This step used to probe the live app itself, eight looks a minute
+        # apart, then tell the owner to reboot the app by hand. That was one
+        # failure email per promotion that Community Cloud was slow on, with
+        # no self heal behind it, which is exactly what the split in
+        # keep-awake.yml exists to end. One place decides whether a deploy
+        # landed, and this is not it.
         if: steps.plan.outputs.needed == 'true' && steps.merge.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -uo pipefail
-          python3 -m pip install playwright
-          python3 -m playwright install --with-deps chromium
-
-          # Community Cloud rebuilds after the push above and that takes time,
-          # so one look a second after the merge would report a stale deploy
-          # that is merely a young one. Look repeatedly instead, and only call
-          # it stale once it has had several minutes to catch up.
-          for attempt in 1 2 3 4 5 6 7 8; do
-            # The working tree is the deploy branch after the merge, so the
-            # registry checked against the live app is the one just shipped.
-            if python3 scripts/keep_streamlit_awake.py --verify-tools; then
-              echo "The live app is awake and serving every registered tool."
-              exit 0
-            fi
-            echo "Attempt ${attempt} of 8: the live app is not current yet."
-            sleep 60
-          done
-
-          echo "::error::The merge to ${DEPLOY_BRANCH} succeeded, but the live app is still serving an older build after eight minutes of retries. Community Cloud has not rebuilt. Reboot the app from its Streamlit Community Cloud dashboard."
-          exit 1
+          set -euo pipefail
+          gh workflow run keep-awake.yml --ref "${DEPLOY_BRANCH}"
+          echo "Dispatched keep-awake.yml on ${DEPLOY_BRANCH}. Its deploy-current job carries the verdict for this merge."
 
       - name: Say so when there was nothing to promote
         if: steps.plan.outputs.needed == 'false'

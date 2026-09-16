@@ -418,3 +418,740 @@ def test_a_wake_only_run_does_not_demand_tool_verification():
     assert wake_only.tools_requested == 0
     assert wake_only.ok
     assert ka.verdict([wake_only])[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Two questions, two exit codes: the warning mode for the schedule
+# ---------------------------------------------------------------------------
+#
+# One job answered "is the app awake" and "is the deploy current" with one
+# exit code, and the result was a failure email every three hours for a
+# stale deploy that was already known and had not changed. These pin the
+# split. Strict mode keeps its exit codes and its pass marker exactly; the
+# wording of one failure bucket changed on purpose, and a status line was
+# added, both pinned below. Warning mode passes on an awake app while still
+# saying, loudly and parseably, that the deploy is stale.
+
+
+def test_strict_mode_is_the_default_and_keeps_its_exit_code():
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33,
+                         missing_tools=["irish-wine-distribution-console "
+                                        "(the live app fell back to the landing page)"])
+    code, lines = ka.verdict([stale])
+    assert code == 1
+    assert lines[0].strip().startswith("FAIL")
+    assert lines[-1].startswith("KEEPALIVE RESULT: FAIL 1 of 1 apps")
+
+
+def test_a_stale_deploy_is_a_warning_not_a_failure_in_warning_mode():
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33,
+                         missing_tools=["irish-wine-distribution-console "
+                                        "(the live app fell back to the landing page)"])
+    code, lines = ka.verdict([stale], stale_is_failure=False)
+    assert code == 0, "an awake app with a stale deploy must not fail the wake"
+    assert lines[0].strip().startswith("WARN "), lines[0]
+    assert "irish-wine-distribution-console" in lines[0]
+    assert lines[-1] == "KEEPALIVE RESULT: PASS 1/1 apps awake"
+
+
+def test_the_stale_verdict_no_longer_says_not_awake_about_a_running_app():
+    """Run 33 printed "1 not awake" for an app that was awake and serving 32
+    of 33 tools. That sent the reader to the wrong place."""
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, missing_tools=["x (landing page)"])
+    _, lines = ka.verdict([stale])
+    assert "awake but stale" in lines[-1]
+    assert "not awake" not in lines[-1]
+
+
+def test_a_down_app_still_fails_in_warning_mode():
+    """Warning mode relaxes the deploy question only. The app being down is
+    the whole reason the schedule exists."""
+    down = ka.AppResult(url=APP, reachable=True, awake=False,
+                        error="the app never rendered: TimeoutError")
+    code, lines = ka.verdict([down], stale_is_failure=False)
+    assert code == 1
+    assert "not awake" in lines[-1]
+
+
+def test_an_unproven_deploy_is_also_a_warning_in_warning_mode():
+    unproven = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                            tools_requested=33,
+                            unchecked_tools=["a (TimeoutError)"])
+    code, lines = ka.verdict([unproven], stale_is_failure=False)
+    assert code == 0
+    assert lines[0].strip().startswith("WARN ")
+    assert "UNPROVEN" in "\n".join(lines)
+
+
+def test_warning_mode_has_no_age_based_escalation():
+    """One was tried. Measured from the deploy head's commit time, it turned a
+    single flaky read on a quiet branch back into a failure every three hours,
+    which is the original complaint. verdict() takes no age and no grace."""
+    import inspect
+    params = inspect.signature(ka.verdict).parameters
+    assert set(params) == {"results", "stale_is_failure"}
+    assert not hasattr(ka.AppResult(url=APP), "stale_for")
+
+
+def test_a_current_deploy_passes_identically_in_both_modes():
+    clean = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33)
+    strict = ka.verdict([clean])
+    lenient = ka.verdict([clean], stale_is_failure=False)
+    assert strict == lenient
+    assert strict[0] == 0
+
+
+# ---------------------------------------------------------------------------
+# Two states that are not "stale"
+# ---------------------------------------------------------------------------
+
+
+def test_every_tool_missing_is_down_not_stale():
+    """A stale deploy misses the newest tool or two. An app missing every one
+    of them is serving no tools: a broken build, and down in both modes. The
+    strict schedule used to fail this; the warning mode must not let it
+    through as a warning."""
+    broken = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                          tools_requested=3, error=ka.BROKEN_APP,
+                          missing_tools=[f"t{i} (landing page)" for i in range(3)])
+    assert not broken.up
+    assert broken.deploy_status == "UNCHECKED"
+    for mode in (True, False):
+        code, lines = ka.verdict([broken], stale_is_failure=mode)
+        assert code == 1
+        assert "not serving tools" in lines[0]
+
+
+def test_a_build_mismatch_is_stale_even_when_every_tool_resolves():
+    """A push that fixes an existing tool adds no registry key, so the tool
+    check alone certifies it deployed while the app runs the old code. The
+    sidebar label is the one signal that catches it."""
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, live_build="d611e14",
+                         expected_build="c06bbb632333dc35abb65fe8c3d4e014f2426708")
+    assert stale.build_mismatch
+    assert stale.deploy_status == "STALE"
+    assert not stale.ok
+    code, lines = ka.verdict([stale])
+    assert code == 1
+    assert "reports build d611e14" in lines[0]
+    assert "deploy branch is at c06bbb6" in lines[0]
+    code, lines = ka.verdict([stale], stale_is_failure=False)
+    assert code == 0
+    assert lines[0].strip().startswith("WARN ")
+
+
+def test_a_matching_build_is_stated_but_never_claimed_as_proof():
+    """The label is read from the checkout at render time, and a git pull
+    updates the checkout before the process reloads, so a match proves
+    nothing. Only the mismatch is acted on."""
+    clean = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, live_build="c06bbb6",
+                         expected_build="c06bbb632333dc35abb65fe8c3d4e014f2426708")
+    assert not clean.build_mismatch
+    assert clean.ok
+    _, lines = ka.verdict([clean])
+    status = next(l for l in lines if l.startswith("DEPLOY STATUS:"))
+    assert "live app reports build c06bbb6" in status
+    assert "matches" not in status
+
+
+def test_an_unknown_or_unread_build_is_never_a_mismatch():
+    for label in ("", "unknown"):
+        result = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                              tools_requested=33, live_build=label,
+                              expected_build="c06bbb6")
+        assert not result.build_mismatch
+        assert result.ok
+
+
+def test_no_expected_build_means_no_mismatch():
+    result = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                          tools_requested=33, live_build="d611e14")
+    assert not result.build_mismatch
+
+
+# ---------------------------------------------------------------------------
+# The deploy status line, parseable on its own
+# ---------------------------------------------------------------------------
+
+
+def test_the_deploy_status_line_is_printed_whenever_tools_were_asked_about():
+    clean = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33)
+    _, lines = ka.verdict([clean])
+    status = [l for l in lines if l.startswith("DEPLOY STATUS:")]
+    assert status == ["DEPLOY STATUS: CURRENT, all 33 tools confirmed"]
+
+
+def test_the_deploy_status_line_is_absent_on_a_wake_only_run():
+    wake_only = ka.AppResult(url=APP, reachable=True, awake=True, health="ok")
+    _, lines = ka.verdict([wake_only])
+    assert not any(l.startswith("DEPLOY STATUS:") for l in lines)
+
+
+def test_the_deploy_status_line_names_stale_and_the_missing_tool():
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33,
+                         missing_tools=["irish-wine-distribution-console (landing page)"])
+    _, lines = ka.verdict([stale], stale_is_failure=False)
+    status = next(l for l in lines if l.startswith("DEPLOY STATUS:"))
+    assert status.startswith("DEPLOY STATUS: STALE,")
+    assert "irish-wine-distribution-console" in status
+
+
+def test_the_deploy_status_line_never_says_current_for_an_app_that_never_rendered():
+    """It did. run() records tools_requested before looking, so an app that
+    never rendered had empty lists and read as CURRENT in the line and the
+    JSON. Nothing was checked, and the line now says so."""
+    down = ka.AppResult(url=APP, reachable=True, awake=False, tools_requested=33,
+                        error="the app never rendered: TimeoutError")
+    assert down.deploy_status == "UNCHECKED"
+    _, lines = ka.verdict([down])
+    status = next(l for l in lines if l.startswith("DEPLOY STATUS:"))
+    assert status.startswith("DEPLOY STATUS: UNCHECKED,")
+    assert "CURRENT" not in status
+
+
+def test_the_deploy_status_line_comes_before_the_result_marker():
+    """lines[-1] is the KEEPALIVE RESULT marker and stays so. The deploy line
+    sits above the blank line that precedes it."""
+    stale = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                         tools_requested=33, missing_tools=["x (landing page)"])
+    _, lines = ka.verdict([stale])
+    assert lines[-1].startswith("KEEPALIVE RESULT:")
+    assert lines[-2] == ""
+    assert lines[-3].startswith("DEPLOY STATUS:")
+
+
+def test_the_deploy_status_line_counts_the_retries():
+    late = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                        tools_requested=33, retries=4)
+    _, lines = ka.verdict([late])
+    status = next(l for l in lines if l.startswith("DEPLOY STATUS:"))
+    assert "(after 4 retries)" in status
+
+
+def test_unchecked_tools_do_not_vanish_from_a_stale_report():
+    """Both lists non empty used to print only the missing one, so the
+    reader could not tell how much of the deploy was actually examined."""
+    both = ka.AppResult(url=APP, reachable=True, awake=True, health="ok",
+                        tools_requested=33, missing_tools=["x (landing page)"],
+                        unchecked_tools=["a (TimeoutError)", "b (TimeoutError)"])
+    _, lines = ka.verdict([both])
+    assert "2 tool page(s) could not be read: a (TimeoutError), b (TimeoutError)" in lines[0]
+
+
+def test_deploy_status_property_has_four_values_and_no_boolean():
+    assert ka.AppResult(url=APP).deploy_status == "UNCHECKED"
+    assert ka.AppResult(url=APP, awake=True, tools_requested=3).deploy_status == "CURRENT"
+    assert ka.AppResult(url=APP, awake=True, tools_requested=3,
+                        unchecked_tools=["a (x)"]).deploy_status == "UNPROVEN"
+    assert ka.AppResult(url=APP, awake=True, tools_requested=3,
+                        missing_tools=["a (x)"],
+                        unchecked_tools=["b (x)"]).deploy_status == "STALE"
+
+
+# ---------------------------------------------------------------------------
+# The live build label
+# ---------------------------------------------------------------------------
+
+
+def test_the_build_label_is_read_from_the_sidebar_text():
+    text = "Toolbench\nDiagnostic tools for client work.\nbuild d611e14\n"
+    assert ka.parse_build_label(text) == "d611e14"
+
+
+def test_an_app_that_does_not_know_its_build_says_unknown():
+    assert ka.parse_build_label("build unknown") == "unknown"
+
+
+def test_no_label_reads_as_empty_not_as_a_guess():
+    assert ka.parse_build_label("How to use\n1. Pick a tool") == ""
+    assert ka.parse_build_label("") == ""
+
+
+def test_a_full_sha_is_accepted_too():
+    assert ka.parse_build_label("build " + "a" * 40) == "a" * 40
+
+
+# ---------------------------------------------------------------------------
+# Retrying only what is not yet confirmed
+# ---------------------------------------------------------------------------
+
+
+class _FakePage:
+    """Enough of a Playwright page for run() to drive.
+
+    The live app "gains" tools over successive looks, which is exactly what
+    Community Cloud applying a push late looks like from outside. A key in
+    timeouts_by_look makes that tool's read raise on that look.
+    """
+
+    def __init__(self, live_by_look, build="abc1234", timeouts_by_look=None,
+                 build_by_look=None):
+        self.live_by_look = live_by_look
+        self.timeouts_by_look = timeouts_by_look or {}
+        self.build_by_look = build_by_look
+        self.look = 0
+        self.build = build
+        self.visited: list[str] = []
+        self.url = ""
+        self.frames: list = []
+
+    def _live(self):
+        return self.live_by_look[min(self.look, len(self.live_by_look) - 1)]
+
+    def goto(self, url, **_):
+        self.url = url
+        self.visited.append(url)
+
+    def wait_for_selector(self, selector, **_):
+        if "wakeup-button" in selector:
+            raise RuntimeError("no sleep screen")
+        key = self.url.rsplit("/", 1)[-1]
+        if "stMain" in selector and key in self.timeouts_by_look.get(self.look, set()):
+            raise TimeoutError(f"{key} timed out on look {self.look}")
+        return object()
+
+    def query_selector(self, selector):
+        return object()
+
+    def wait_for_timeout(self, ms):
+        pass
+
+    def locator(self, selector):
+        raise AssertionError("never clicked")
+
+    def screenshot(self, **_):
+        pass
+
+    def inner_text(self, selector, **_):
+        if "stSidebar" in selector:
+            build = self.build
+            if self.build_by_look:
+                build = self.build_by_look[min(self.look, len(self.build_by_look) - 1)]
+            return f"Toolbench\nbuild {build}"
+        key = self.url.rsplit("/", 1)[-1]
+        if key in self._live():
+            return f"{key} page content that differs from home"
+        return "Toolbench home landing page"
+
+
+class _FakeDriver:
+    def __init__(self, page):
+        self.page = page
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    @property
+    def chromium(self):
+        page = self.page
+
+        class _Browser:
+            def new_context(self, **_):
+                class _Ctx:
+                    def new_page(self_inner):
+                        return page
+
+                    def close(self_inner):
+                        pass
+                return _Ctx()
+
+            def close(self):
+                pass
+
+        class _Chromium:
+            def launch(self, **_):
+                return _Browser()
+        return _Chromium()
+
+
+def _drive(monkeypatch, page, tools=(("a", "A"), ("b", "B"), ("c", "C")), **kwargs):
+    import types
+    fake_pw = types.SimpleNamespace(sync_playwright=lambda: _FakeDriver(page))
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake_pw)
+    monkeypatch.setitem(sys.modules, "playwright", types.SimpleNamespace(sync_api=fake_pw))
+    monkeypatch.setattr(ka, "read_health", lambda *_: "ok")
+    monkeypatch.setattr(ka, "DWELL_MS", 0)
+    ticks = {"t": 0.0}
+
+    def clock():
+        return ticks["t"]
+
+    def sleep(seconds):
+        ticks["t"] += seconds
+        page.look += 1
+
+    return ka.run([APP], list(tools), None, "", sleep=sleep, clock=clock, **kwargs)
+
+
+def test_a_late_deploy_is_confirmed_by_retrying(monkeypatch):
+    # Look 0: only a live. Look 1: a and b. Look 2: all three.
+    page = _FakePage([{"a"}, {"a", "b"}, {"a", "b", "c"}])
+    results = _drive(monkeypatch, page, retry_until_current=300, retry_every=60)
+    result = results[0]
+    assert result.missing_tools == []
+    assert result.retries == 2
+    assert result.ok
+
+
+def test_retries_only_look_at_the_tools_not_yet_confirmed(monkeypatch):
+    page = _FakePage([{"a"}, {"a", "b", "c"}])
+    _drive(monkeypatch, page, retry_until_current=300, retry_every=60)
+    tool_visits = [u.rsplit("/", 1)[-1] for u in page.visited if u != APP]
+    # First pass reads a, b, c. The retry reads only b and c.
+    assert tool_visits == ["a", "b", "c", "b", "c"]
+
+
+def test_the_retry_budget_is_honoured_and_the_last_wait_is_clamped(monkeypatch):
+    # One tool live throughout, two never appear. Not all three: an app
+    # missing every tool is classed as broken rather than stale, on purpose.
+    page = _FakePage([{"a"}])
+    results = _drive(monkeypatch, page, retry_until_current=150, retry_every=60)
+    result = results[0]
+    # Waits of 60, 60 and then 30, so the last look lands exactly at the
+    # deadline rather than a full interval past it.
+    assert result.retries == 3
+    assert result.deploy_status == "STALE"
+    assert len(result.missing_tools) == 2
+
+
+def test_a_single_look_when_no_retry_budget_is_given(monkeypatch):
+    page = _FakePage([{"a"}, {"a", "b", "c"}])
+    results = _drive(monkeypatch, page)
+    assert results[0].retries == 0
+    assert results[0].deploy_status == "STALE"
+
+
+def test_the_live_build_is_read_and_carried(monkeypatch):
+    page = _FakePage([{"a", "b", "c"}], build="c06bbb6")
+    results = _drive(monkeypatch, page)
+    assert results[0].live_build == "c06bbb6"
+
+
+def test_a_tool_proved_missing_stays_missing_when_its_re_read_times_out(monkeypatch):
+    """A timeout is not a confirmation. Letting it downgrade a proved STALE
+    into an UNPROVEN was a real bug."""
+    page = _FakePage([set(), set()], timeouts_by_look={1: {"c"}})
+    results = _drive(monkeypatch, page, retry_until_current=60, retry_every=60)
+    result = results[0]
+    assert result.retries == 1
+    assert "c (the live app fell back to the landing page)" in result.missing_tools
+    assert not any(e.startswith("c ") for e in result.unchecked_tools)
+
+
+def test_merge_passes_keeps_proof_and_drops_nothing_silently():
+    prev = ["a (landing page)", "b (landing page)"]
+    missing, unchecked = ka._merge_passes(prev, ["a (landing page)"],
+                                          ["b (TimeoutError)", "c (TimeoutError)"])
+    assert missing == ["a (landing page)", "b (landing page)"]
+    assert unchecked == ["c (TimeoutError)"]
+
+
+def test_the_retry_loop_waits_for_the_build_label_when_tools_resolve(monkeypatch):
+    """Every key resolves but the label is behind: that is stale, and the
+    loop keeps looking until the label catches up."""
+    page = _FakePage([{"a", "b", "c"}], build_by_look=["0ad0000", "1ce1111"])
+    results = _drive(monkeypatch, page, retry_until_current=120, retry_every=60,
+                     expect_build="1ce1111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    result = results[0]
+    assert result.retries == 1
+    assert result.live_build == "1ce1111"
+    assert not result.build_mismatch
+    assert result.ok
+
+
+def test_the_build_label_read_on_a_retry_is_the_fresh_one(monkeypatch):
+    """It was read before the navigation, so the pass that confirmed the tools
+    reported the build from the pass before."""
+    page = _FakePage([set(), {"a", "b", "c"}], build_by_look=["0ad0000", "1ce1111"])
+    results = _drive(monkeypatch, page, retry_until_current=60, retry_every=60,
+                     expect_build="1ce1111aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    assert results[0].live_build == "1ce1111"
+    assert results[0].ok
+
+
+def test_an_app_missing_every_tool_is_reported_down(monkeypatch):
+    page = _FakePage([set()])
+    results = _drive(monkeypatch, page)
+    result = results[0]
+    assert result.error == ka.BROKEN_APP
+    assert not result.up
+    assert ka.verdict(results, stale_is_failure=False)[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Annotations
+# ---------------------------------------------------------------------------
+
+
+def test_soft_annotations_turn_fail_into_warning(capsys):
+    ka.emit_annotations(["  FAIL x stale"], soft=True)
+    assert capsys.readouterr().out.startswith("::warning::")
+    ka.emit_annotations(["  FAIL x stale"])
+    assert capsys.readouterr().out.startswith("::error::")
+
+
+def test_nothing_is_annotated_on_a_clean_run(capsys):
+    _, lines = ka.verdict([ka.AppResult(url=APP, reachable=True, awake=True, health="ok")])
+    ka.emit_annotations(lines)
+    assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# The deploy stamp
+# ---------------------------------------------------------------------------
+
+sys.path.insert(0, str(ROOT / "scripts"))
+import deploy_stamp as ds  # noqa: E402
+
+
+def test_the_stamp_is_the_first_line_when_absent():
+    """Humans append requirements at the bottom, so a stamp at the bottom
+    conflicted with the one push whose redeploy matters most."""
+    text, changed = ds.apply_stamp("streamlit>=1.63\n", "abc1234", "2026-09-16T12:00:00Z")
+    assert changed
+    assert text == "# deploy stamp: abc1234 2026-09-16T12:00:00Z\nstreamlit>=1.63\n"
+
+
+def test_an_existing_stamp_anywhere_is_moved_to_the_top():
+    original = "streamlit>=1.63\n# deploy stamp: old0000 2026-01-01T00:00:00Z\npyyaml\n"
+    text, changed = ds.apply_stamp(original, "new1111", "2026-09-16T12:00:00Z")
+    assert changed
+    assert text == "# deploy stamp: new1111 2026-09-16T12:00:00Z\nstreamlit>=1.63\npyyaml\n"
+
+
+def test_two_stamps_become_one():
+    text, _ = ds.apply_stamp("# deploy stamp: aaa 1\n# deploy stamp: bbb 2\nx\n", "ccc", "3")
+    assert text.count(ds.STAMP_PREFIX) == 1
+    assert text == "# deploy stamp: ccc 3\nx\n"
+
+
+def test_an_indented_stamp_is_still_a_stamp():
+    text, _ = ds.apply_stamp("  # deploy stamp: aaa 1\nx\n", "ccc", "3")
+    assert text == "# deploy stamp: ccc 3\nx\n"
+
+
+def test_crlf_and_a_missing_final_newline_are_normalised():
+    text, _ = ds.apply_stamp("a>=1\r\nb>=2", "ccc", "3")
+    assert text == "# deploy stamp: ccc 3\na>=1\nb>=2\n"
+
+
+def test_an_empty_file_gets_just_the_stamp():
+    text, changed = ds.apply_stamp("", "ccc", "3")
+    assert changed
+    assert text == "# deploy stamp: ccc 3\n"
+
+
+def test_a_second_nudge_for_the_same_commit_still_changes_the_file():
+    """The point is that the file differs from what Community Cloud last saw,
+    so two nudges for one commit must both count."""
+    first, _ = ds.apply_stamp("x\n", "abc1234", "2026-09-16T12:00:00Z")
+    second, changed = ds.apply_stamp(first, "abc1234", "2026-09-16T12:30:00Z")
+    assert changed
+    assert first != second
+
+
+def test_an_identical_stamp_is_reported_unchanged():
+    first, _ = ds.apply_stamp("x\n", "abc1234", "2026-09-16T12:00:00Z")
+    _, changed = ds.apply_stamp(first, "abc1234", "2026-09-16T12:00:00Z")
+    assert not changed
+
+
+def test_the_current_stamp_can_be_read_back():
+    text, _ = ds.apply_stamp("x\n", "abc1234", "2026-09-16T12:00:00Z")
+    assert ds.current_stamp(text) == "abc1234"
+    assert ds.current_stamp("x\n") == ""
+    assert ds.current_stamp("   # deploy stamp: zzz 1\n") == "zzz"
+
+
+def test_the_stamp_installs_nothing():
+    """A comment, and only a comment. pip must see no new requirement."""
+    text, _ = ds.apply_stamp("streamlit>=1.63\n", "abc1234", "2026-09-16T12:00:00Z")
+    requirements = [l for l in text.splitlines() if l.strip() and not l.startswith("#")]
+    assert requirements == ["streamlit>=1.63"]
+
+
+def test_the_shipped_requirements_carry_exactly_one_stamp_on_line_one():
+    text = (ROOT / "requirements.txt").read_text()
+    assert text.count(ds.STAMP_PREFIX) == 1
+    assert text.splitlines()[0].startswith(ds.STAMP_PREFIX)
+
+
+def test_the_stamp_script_writes_and_reports(tmp_path):
+    target = tmp_path / "requirements.txt"
+    target.write_text("streamlit>=1.63\n")
+    assert ds.main(["abc1234", str(target)]) == 0
+    assert ds.current_stamp(target.read_text()) == "abc1234"
+
+
+def test_the_stamp_script_refuses_a_missing_file(tmp_path):
+    assert ds.main(["abc1234", str(tmp_path / "nope.txt")]) == 2
+
+
+# ---------------------------------------------------------------------------
+# The two job workflow
+# ---------------------------------------------------------------------------
+
+
+def _workflow():
+    import yaml
+    return yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "keep-awake.yml").read_text())
+
+
+def _step(job, step_id):
+    return next(s for s in _workflow()["jobs"][job]["steps"] if s.get("id") == step_id)
+
+
+def test_the_wake_job_reports_a_stale_deploy_as_a_warning():
+    steps = _workflow()["jobs"]["wake"]["steps"]
+    wake = next(s for s in steps if "keep_streamlit_awake.py" in str(s.get("run", "")))
+    assert "--tools-as-warnings" in wake["run"]
+    assert "--expect-build" in wake["run"]
+    assert "--stale-grace-seconds" not in wake["run"]
+
+
+def test_the_deploy_job_is_strict_and_retries():
+    steps = _workflow()["jobs"]["deploy-current"]["steps"]
+    probes = [s for s in steps if "keep_streamlit_awake.py" in str(s.get("run", ""))]
+    assert len(probes) == 2, "one look before the nudge and one after"
+    for probe in probes:
+        assert "--tools-as-warnings" not in probe["run"]
+        assert "--retry-until-current" in probe["run"]
+
+
+def test_the_first_look_annotates_softly_and_the_second_does_not():
+    first = _step("deploy-current", "first")
+    second = _step("deploy-current", "second")
+    assert "--soft-annotations" in first["run"]
+    assert "--soft-annotations" not in second["run"]
+    assert first.get("continue-on-error") is True
+
+
+def test_the_deploy_job_never_runs_on_the_schedule():
+    condition = _workflow()["jobs"]["deploy-current"]["if"]
+    assert "github.event_name != 'schedule'" in condition
+
+
+def test_the_deploy_job_runs_only_for_the_deploy_branch():
+    data = _workflow()
+    condition = data["jobs"]["deploy-current"]["if"]
+    branch = data["env"]["DEPLOY_BRANCH"]
+    assert f"github.ref_name == '{branch}'" in condition, (
+        "the job level if spells the branch out and it has drifted from env")
+
+
+def test_the_deploy_job_does_not_wait_for_the_wake_job():
+    """Serialising them put the verdict seven minutes later than it needed
+    to be, under the observed latency of the path it is measuring."""
+    assert "needs" not in _workflow()["jobs"]["deploy-current"]
+
+
+def test_deploy_branch_runs_have_their_own_queue():
+    """A single group held every event with room for one pending run, so a
+    deploy branch push queued behind a long deploy check was cancelled by the
+    next schedule tick or session branch push and never got its verdict."""
+    data = _workflow()
+    group = data["concurrency"]["group"]
+    branch = data["env"]["DEPLOY_BRANCH"]
+    assert "github.event_name != 'schedule'" in group
+    assert f"github.ref_name == '{branch}'" in group
+    assert "'deploy'" in group and "'wake'" in group
+    assert data["concurrency"]["cancel-in-progress"] is False
+
+
+def test_the_nudge_cannot_start_another_nudge():
+    data = _workflow()
+    condition = data["jobs"]["deploy-current"]["if"]
+    assert "[deploy-stamp]" in condition
+    nudge = _step("deploy-current", "nudge")
+    assert "[deploy-stamp]" in nudge["run"], (
+        "the stamp commit message must carry the tag the job filters on")
+
+
+def test_the_nudge_does_not_restamp_a_redeploy_still_building():
+    nudge = _step("deploy-current", "nudge")
+    assert "-lt 900" in nudge["run"]
+    assert "Not stamping again" in nudge["run"]
+
+
+def test_only_the_deploy_job_may_write():
+    data = _workflow()
+    assert data["permissions"] == {"contents": "read"}
+    assert "permissions" not in data["jobs"]["wake"]
+    assert data["jobs"]["deploy-current"]["permissions"] == {"contents": "write"}
+
+
+def test_the_nudge_is_gated_on_the_app_being_up():
+    """A down app gets no stamp. A nudge would not help it, and the second
+    wait would then blame Community Cloud for a redeploy it never asked for."""
+    nudge = _step("deploy-current", "nudge")
+    assert "steps.first.outputs.up == 'true'" in nudge["if"]
+    first = _step("deploy-current", "first")
+    assert "up=" in first["run"] and "status=" in first["run"]
+    down = next(s for s in _workflow()["jobs"]["deploy-current"]["steps"]
+                if "down rather than stale" in s.get("name", ""))
+    assert "exit 1" in down["run"]
+
+
+def test_the_nudge_uses_the_stamp_script_and_only_touches_requirements():
+    nudge = _step("deploy-current", "nudge")
+    assert "set -euo pipefail" in nudge["run"]
+    assert "scripts/deploy_stamp.py" in nudge["run"]
+    assert 'grep -q "STAMP RESULT: WRITTEN"' in nudge["run"]
+    assert "git add requirements.txt" in nudge["run"]
+    assert "git add ." not in nudge["run"]
+    assert "git add -A" not in nudge["run"]
+    assert "--force" not in nudge["run"]
+
+
+def test_a_rejected_nudge_push_is_told_apart_from_a_moved_branch():
+    """Both used to read as "someone else pushed" and go green. A branch rule
+    or a bad token that rejects the nudge is a deploy that cannot self heal,
+    and that is a failure."""
+    nudge = _step("deploy-current", "nudge")
+    assert 'echo "pushed=false"' in nudge["run"]
+    assert "has not moved" in nudge["run"]
+    assert "::error::" in nudge["run"]
+    assert "::warning::" in nudge["run"]
+    second = _step("deploy-current", "second")
+    assert "steps.nudge.outputs.pushed == 'true'" in second["if"]
+
+
+def test_the_second_wait_expects_the_stamp_commit():
+    nudge = _step("deploy-current", "nudge")
+    second = _step("deploy-current", "second")
+    assert 'echo "sha=' in nudge["run"]
+    assert "steps.nudge.outputs.sha" in second["run"]
+
+
+def test_the_second_wait_tolerates_a_redeploy_in_progress():
+    second = _step("deploy-current", "second")
+    assert "for attempt in 1 2" in second["run"]
+    assert "sleep 120" in second["run"]
+
+
+def test_the_reboot_button_exists():
+    """A dispatch with force nudge skips the wait and stamps at once, which is
+    the owner's replacement for the reboot button on share.streamlit.io."""
+    data = _workflow()
+    triggers = data.get("on", data.get(True))
+    assert triggers["workflow_dispatch"]["inputs"]["force_nudge"]["type"] == "boolean"
+    first = _step("deploy-current", "first")
+    assert "env.FORCE_NUDGE != 'true'" in first["if"]
+    nudge = _step("deploy-current", "nudge")
+    assert "env.FORCE_NUDGE == 'true'" in nudge["if"]
+
+
+def test_the_deploy_job_outlives_a_pass_of_timeouts():
+    assert _workflow()["jobs"]["deploy-current"]["timeout-minutes"] >= 90

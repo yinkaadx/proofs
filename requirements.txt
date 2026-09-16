@@ -1,3 +1,4 @@
+# deploy stamp: c06bbb6 2026-09-16T12:59:30Z
 # 1.63 is the floor because streamlit_app.py passes position= to
 # st.navigation, which older releases do not accept: on an older resolve
 # the app raises a TypeError at boot on every page rather than merely

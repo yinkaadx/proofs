@@ -5,6 +5,28 @@
 # whether the app is running or asleep, so an HTTP uptime check reports green
 # on a sleeping app. Only a real browser session opens the websocket that
 # Community Cloud counts as a visit, so this drives headless Chromium.
+#
+# Two jobs, because two questions.
+#
+#   wake            Is the app awake and serving. Runs on the schedule, on
+#                   every push and by hand. Its failure means the app is down
+#                   and nothing else. A stale deploy is reported here as a
+#                   warning annotation and in the job summary, not as a
+#                   failure: one job used to answer both questions with one
+#                   exit code, and the result was a failure email every three
+#                   hours for a condition that was already known, was not a
+#                   sleeping app, and had not changed since the last email.
+#                   That is how the next real outage gets deleted unread.
+#
+#   deploy-current  Is the live app running what just reached the deploy
+#                   branch. Runs once per change to that branch, by push or by
+#                   the dispatch promote-to-deploy.yml makes, never on the
+#                   schedule. Waits for Community Cloud to apply it, and when
+#                   Community Cloud does not, nudges it with the one change its
+#                   documentation says forces a full redeploy: a dependency
+#                   file change. Fails only if the app is still stale after
+#                   that. One change, one verdict, at most one email, and by
+#                   then it is news.
 name: Keep Streamlit apps awake
 
 on:
@@ -23,11 +45,25 @@ on:
   push:
     branches: ["**"]
   workflow_dispatch:
+    inputs:
+      force_nudge:
+        description: "Skip the wait and make Community Cloud do a full redeploy now. This is the reboot button."
+        type: boolean
+        default: false
 
+# Two queues, not one. A single group held every event, with room for one
+# pending run, so a deploy branch push queued behind a forty minute deploy
+# check was cancelled by the next schedule tick or the next push to any
+# session branch, and its deploy verdict was never given. Deploy branch runs
+# now queue only behind each other, where being superseded by a newer push is
+# harmless because the newer push carries the older one's tools. Everything
+# else, the schedule and pushes to other branches, queues separately and never
+# touches that queue.
 concurrency:
-  group: keep-streamlit-awake
+  group: keep-streamlit-awake-${{ (github.event_name != 'schedule' && github.ref_name == 'claude/kind-feynman-489x72') && 'deploy' || 'wake' }}
   cancel-in-progress: false
 
+# Read only by default. The one job that writes says so itself, below.
 permissions:
   contents: read
 
@@ -64,9 +100,11 @@ jobs:
           if git fetch --depth=1 origin "$DEPLOY_BRANCH" 2>/dev/null; then
             git show FETCH_HEAD:tools/registry.py > deployed-registry.py
             echo "path=deployed-registry.py" >> "$GITHUB_OUTPUT"
-            echo "Measuring the live app against $DEPLOY_BRANCH."
+            echo "sha=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+            echo "Measuring the live app against $DEPLOY_BRANCH at $(git rev-parse --short FETCH_HEAD)."
           else
             echo "path=tools/registry.py" >> "$GITHUB_OUTPUT"
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
             echo "Could not read $DEPLOY_BRANCH, falling back to this checkout."
           fi
 
@@ -75,7 +113,8 @@ jobs:
           python3 scripts/keep_streamlit_awake.py \
             --apps .github/streamlit-apps.txt \
             --registry "${{ steps.registry.outputs.path }}" \
-            --verify-tools \
+            --verify-tools --tools-as-warnings \
+            --expect-build "${{ steps.registry.outputs.sha }}" \
             --shots keepalive-evidence
 
       - name: Keep the evidence
@@ -85,6 +124,200 @@ jobs:
           name: keepalive-evidence-${{ github.run_number }}
           path: |
             keepalive-evidence/
+            keepalive-summary.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+  deploy-current:
+    # A change to the deploy branch is the one moment a stale deploy is news.
+    # The schedule never runs this, so it can never repeat the news.
+    #
+    # The branch is spelled out rather than read from env because a job level
+    # `if` cannot see env. tests/test_keep_streamlit_awake.py holds the two
+    # spellings together.
+    #
+    # Not `needs: wake`. The two jobs run side by side: the wake job's own
+    # look on a push is redundant with this one, and serialising them put the
+    # verdict here seven minutes later than it needed to be.
+    #
+    # A push made with GITHUB_TOKEN, which is what the nudge below makes,
+    # does not start workflows at all, so this cannot loop. The message check
+    # is a second lock on the same door for the day somebody pushes a stamp
+    # with a personal token.
+    if: >-
+      github.event_name != 'schedule'
+      && github.ref_name == 'claude/kind-feynman-489x72'
+      && !contains(github.event.head_commit.message, '[deploy-stamp]')
+    runs-on: ubuntu-latest
+    # Generous on purpose. A pass in which every tool page times out costs
+    # about forty minutes on its own, and the job must outlive one of those
+    # plus the nudge and the wait that follows, or it dies with a generic
+    # timeout in place of the diagnosis it was about to give.
+    timeout-minutes: 90
+    permissions:
+      # The nudge commits one comment line to the deploy branch. Nothing else
+      # here writes anywhere.
+      contents: write
+    env:
+      FORCE_NUDGE: ${{ github.event.inputs.force_nudge == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Playwright and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Take the tool list from the deploy branch
+        id: registry
+        run: |
+          git fetch --depth=1 origin "$DEPLOY_BRANCH"
+          git show FETCH_HEAD:tools/registry.py > deployed-registry.py
+          echo "sha=$(git rev-parse FETCH_HEAD)" >> "$GITHUB_OUTPUT"
+          echo "Measuring the live app against $DEPLOY_BRANCH at $(git rev-parse --short FETCH_HEAD)."
+
+      - name: Wait for Community Cloud to apply the change
+        id: first
+        # Six minutes. Today's pushes were applied in under four minutes when
+        # they were applied promptly at all, and in twenty to fifty when they
+        # were not. Waiting long on a path known to be flaky only delays the
+        # nudge that fixes it. This look is expected to fail sometimes, so its
+        # annotations are warnings: a green run must not carry a red mark from
+        # the attempt that led to the nudge.
+        if: env.FORCE_NUDGE != 'true'
+        continue-on-error: true
+        run: |
+          set -uo pipefail
+          code=0
+          python3 scripts/keep_streamlit_awake.py \
+            --apps .github/streamlit-apps.txt \
+            --registry deployed-registry.py \
+            --verify-tools --soft-annotations \
+            --expect-build "${{ steps.registry.outputs.sha }}" \
+            --retry-until-current 360 --retry-every 60 \
+            --shots deploy-evidence-first || code=$?
+          # The nudge must know whether this failed because the deploy is
+          # stale, which it can fix, or because the app is down, which it
+          # cannot. The summary file says which.
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          try:
+              app = json.load(open("keepalive-summary.json"))["apps"][0]
+              print(f"status={app['deploy_status']}")
+              print(f"up={'true' if app['up'] else 'false'}")
+          except Exception:
+              print("status=UNKNOWN")
+              print("up=false")
+          PY
+          exit "$code"
+
+      - name: Nudge Community Cloud with a dependency file change
+        id: nudge
+        if: >-
+          env.FORCE_NUDGE == 'true'
+          || (steps.first.outcome == 'failure' && steps.first.outputs.up == 'true')
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Stamp the branch head as it is now, not as this job saw it at
+          # checkout. If somebody pushed meanwhile, their push starts its own
+          # run of this job, which owns the question from here.
+          git fetch origin "$DEPLOY_BRANCH"
+          git checkout -B "$DEPLOY_BRANCH" "origin/$DEPLOY_BRANCH"
+          parent="$(git rev-parse HEAD)"
+
+          # A stamp younger than fifteen minutes is a redeploy still building.
+          # Stamping again would restart that build and lengthen the outage,
+          # which is what a run queued behind a nudging run would otherwise do.
+          if git log -1 --format=%s HEAD | grep -q '\[deploy-stamp\]'; then
+            age=$(( $(date +%s) - $(git log -1 --format=%ct HEAD) ))
+            if [ "$age" -lt 900 ] && [ "$FORCE_NUDGE" != "true" ]; then
+              echo "sha=$parent" >> "$GITHUB_OUTPUT"
+              echo "pushed=true" >> "$GITHUB_OUTPUT"
+              echo "A nudge landed ${age}s ago and its redeploy is still building. Not stamping again, waiting on that one."
+              exit 0
+            fi
+          fi
+
+          python3 scripts/deploy_stamp.py "$(git rev-parse --short HEAD)" | tee stamp.log
+          grep -q "STAMP RESULT: WRITTEN" stamp.log
+          git add requirements.txt
+          git commit -m "chore(deploy): nudge Community Cloud to apply $(git rev-parse --short "$parent") [deploy-stamp]" \
+                     -m "Community Cloud had not applied the change after six minutes of looking. A dependency file change makes it do a full redeploy. This line installs nothing."
+          if git push origin "$DEPLOY_BRANCH"; then
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            echo "Nudged. Community Cloud should now do a full redeploy."
+            exit 0
+          fi
+
+          # Rejected. Either the branch moved, which is fine and somebody
+          # else's run now owns the question, or it did not, which means a
+          # branch rule, the token or the network refused the nudge and the
+          # deploy cannot self heal. Those are different outcomes and were
+          # once reported as the same green one.
+          git fetch origin "$DEPLOY_BRANCH"
+          if [ "$(git rev-parse "origin/$DEPLOY_BRANCH")" = "$parent" ]; then
+            echo "::error::The nudge push to $DEPLOY_BRANCH was rejected and the branch has not moved, so nothing else pushed. A branch rule, the token or the network refused it and the deploy cannot self heal. The git output above says which."
+            exit 1
+          fi
+          echo "pushed=false" >> "$GITHUB_OUTPUT"
+          echo "::warning::$DEPLOY_BRANCH moved to $(git rev-parse --short "origin/$DEPLOY_BRANCH") while this ran. That change starts its own run of this job, which owns the deploy question now."
+
+      - name: Wait again after the nudge
+        id: second
+        if: steps.nudge.outputs.pushed == 'true'
+        run: |
+          set -uo pipefail
+          # A full redeploy restarts the app, and for a minute or two there is
+          # no app to read, only a boot screen. Two attempts with a pause
+          # between them cover that, and each attempt keeps looking at the
+          # tools not yet confirmed for ten minutes before giving up. The
+          # expected build is the stamp commit, which is now the branch head.
+          for attempt in 1 2; do
+            if python3 scripts/keep_streamlit_awake.py \
+                --apps .github/streamlit-apps.txt \
+                --registry deployed-registry.py \
+                --verify-tools \
+                --expect-build "${{ steps.nudge.outputs.sha }}" \
+                --retry-until-current 600 --retry-every 60 \
+                --shots "deploy-evidence-after-nudge-$attempt"; then
+              echo "The live app now serves every registered tool."
+              exit 0
+            fi
+            echo "Attempt $attempt of 2: not current yet, pausing before looking again."
+            sleep 120
+          done
+          echo "::error::The deploy branch was nudged with a dependency change and the live app is still not serving every registered tool. Community Cloud has not redeployed. Run this workflow by hand with force nudge as a last resort, then check share.streamlit.io."
+          exit 1
+
+      - name: Report an app that is down rather than stale
+        # A down app is the wake job's finding, and a nudge would not help
+        # it. Said plainly here too, so this job never goes green having
+        # looked at nothing.
+        if: >-
+          env.FORCE_NUDGE != 'true'
+          && steps.first.outcome == 'failure'
+          && steps.first.outputs.up != 'true'
+        run: |
+          echo "::error::The first look found the app down rather than stale (deploy status ${{ steps.first.outputs.status }}). A nudge would not help. See the wake job for the app itself."
+          exit 1
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-evidence-${{ github.run_number }}
+          path: |
+            deploy-evidence-first/
+            deploy-evidence-after-nudge-1/
+            deploy-evidence-after-nudge-2/
             keepalive-summary.json
           retention-days: 14
           if-no-files-found: ignore
