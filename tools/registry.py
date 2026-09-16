@@ -65,6 +65,7 @@ def all_tools() -> list[Tool]:
     from tools.megaport_bgp_rtbh_console.page import render as megaport_bgp_rtbh_console
     from tools.brokerage_qa_workflow_console.page import render as brokerage_qa_workflow_console
     from tools.appsec_threat_modeling_console.page import render as appsec_threat_modeling_console
+    from tools.saas_multitenant_pg_console.page import render as saas_multitenant_pg_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -417,6 +418,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Application security and product",
             render=appsec_threat_modeling_console,
+        ),
+        Tool(
+            key="saas-multitenant-pg-console",
+            title="SaaS Multi Tenant PostgreSQL Console",
+            icon="\U0001F5C4",
+            tagline=(
+                "PostgreSQL Row Level Security simulator, cross tenant query "
+                "isolation tester, and multi tenancy architecture matrix."
+            ),
+            audience="Platform and database engineering",
+            render=saas_multitenant_pg_console,
         ),
     ] + [
         Tool(
