@@ -70,6 +70,7 @@ def all_tools() -> list[Tool]:
     from tools.irish_wine_distribution_console.page import render as irish_wine_distribution_console
     from tools.toh_systems_launch_console.page import render as toh_systems_launch_console
     from tools.sgtm_claude_agent_console.page import render as sgtm_claude_agent_console
+    from tools.cat_psychometric_audit_console.page import render as cat_psychometric_audit_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -477,6 +478,18 @@ def all_tools() -> list[Tool]:
             ),
             audience="Analytics and marketing engineering",
             render=sgtm_claude_agent_console,
+        ),
+        Tool(
+            key="cat-psychometric-audit-console",
+            title="CAT Psychometric & IRT Audit Console",
+            icon="\U0001F4D0",
+            tagline=(
+                "Computer adaptive testing audit engine, Fisher information "
+                "bound calculator, EAP prior shrinkage simulator, and bank "
+                "exhaustion model."
+            ),
+            audience="Psychometrics and assessment",
+            render=cat_psychometric_audit_console,
         ),
     ] + [
         Tool(
