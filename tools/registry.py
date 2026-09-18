@@ -74,6 +74,7 @@ def all_tools() -> list[Tool]:
     from tools.shopify_preorder_architecture_console.page import render as shopify_preorder_architecture_console
     from tools.idrac_rocky_kickstart_console.page import render as idrac_rocky_kickstart_console
     from tools.ipb_v5_upgrade_diagnostic.page import render as ipb_v5_upgrade_diagnostic
+    from tools.transfer_booking_routing_console.page import render as transfer_booking_routing_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -526,6 +527,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Forum platform migrations",
             render=ipb_v5_upgrade_diagnostic,
+        ),
+        Tool(
+            key="transfer-booking-routing-console",
+            title="Transfer Booking & Routing Console",
+            icon="\U0001F690",
+            tagline=(
+                "Dynamic distance pricing engine, web GPS background "
+                "limitation evaluator, and driver status simulator."
+            ),
+            audience="Transport and dispatch",
+            render=transfer_booking_routing_console,
         ),
     ] + [
         Tool(
