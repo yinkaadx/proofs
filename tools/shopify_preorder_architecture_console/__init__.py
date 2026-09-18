@@ -1,0 +1,1 @@
+"""Shopify Preorder Architecture Console."""

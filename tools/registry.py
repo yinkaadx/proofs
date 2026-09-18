@@ -71,6 +71,7 @@ def all_tools() -> list[Tool]:
     from tools.toh_systems_launch_console.page import render as toh_systems_launch_console
     from tools.sgtm_claude_agent_console.page import render as sgtm_claude_agent_console
     from tools.cat_psychometric_audit_console.page import render as cat_psychometric_audit_console
+    from tools.shopify_preorder_architecture_console.page import render as shopify_preorder_architecture_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -490,6 +491,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Psychometrics and assessment",
             render=cat_psychometric_audit_console,
+        ),
+        Tool(
+            key="shopify-preorder-architecture-console",
+            title="Shopify Preorder Architecture Console",
+            icon="\U0001F6D2",
+            tagline=(
+                "Split cart fulfillment router, inventory policy ledger, and "
+                "payment capture simulator for preorders."
+            ),
+            audience="Ecommerce and Shopify builds",
+            render=shopify_preorder_architecture_console,
         ),
     ] + [
         Tool(
