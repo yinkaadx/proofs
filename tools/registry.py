@@ -72,6 +72,7 @@ def all_tools() -> list[Tool]:
     from tools.sgtm_claude_agent_console.page import render as sgtm_claude_agent_console
     from tools.cat_psychometric_audit_console.page import render as cat_psychometric_audit_console
     from tools.shopify_preorder_architecture_console.page import render as shopify_preorder_architecture_console
+    from tools.idrac_rocky_kickstart_console.page import render as idrac_rocky_kickstart_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -502,6 +503,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Ecommerce and Shopify builds",
             render=shopify_preorder_architecture_console,
+        ),
+        Tool(
+            key="idrac-rocky-kickstart-console",
+            title="iDRAC Rocky Linux Provisioning Console",
+            icon="\U0001F5A5",
+            tagline=(
+                "Dell iDRAC virtual media simulator, Rocky Linux Kickstart "
+                "generator, and parallel server deployment tracker."
+            ),
+            audience="Bare metal and datacentre operations",
+            render=idrac_rocky_kickstart_console,
         ),
     ] + [
         Tool(
