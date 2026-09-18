@@ -73,6 +73,7 @@ def all_tools() -> list[Tool]:
     from tools.cat_psychometric_audit_console.page import render as cat_psychometric_audit_console
     from tools.shopify_preorder_architecture_console.page import render as shopify_preorder_architecture_console
     from tools.idrac_rocky_kickstart_console.page import render as idrac_rocky_kickstart_console
+    from tools.ipb_v5_upgrade_diagnostic.page import render as ipb_v5_upgrade_diagnostic
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -514,6 +515,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Bare metal and datacentre operations",
             render=idrac_rocky_kickstart_console,
+        ),
+        Tool(
+            key="ipb-v5-upgrade-diagnostic",
+            title="IPB V5 Upgrade Diagnostic Console",
+            icon="\U0001F9E9",
+            tagline=(
+                "Invision Community 5 PHP plugin compatibility scanner, "
+                "theme CSS variable mapper, and database record restorer."
+            ),
+            audience="Forum platform migrations",
+            render=ipb_v5_upgrade_diagnostic,
         ),
     ] + [
         Tool(
