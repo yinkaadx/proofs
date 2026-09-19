@@ -79,6 +79,7 @@ def all_tools() -> list[Tool]:
     from tools.research_request_diagnostic_console.page import render as research_request_diagnostic_console
     from tools.school_bus_routing_console.page import render as school_bus_routing_console
     from tools.mikrotik_netshare_detector.page import render as mikrotik_netshare_detector
+    from tools.python_algo_trading_console.page import render as python_algo_trading_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -586,6 +587,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="ISP and hotspot operations",
             render=mikrotik_netshare_detector,
+        ),
+        Tool(
+            key="python-algo-trading-console",
+            title="Python Algorithmic Trading Console",
+            icon="\U0001F4C8",
+            tagline=(
+                "Dynamic position sizing engine, daily profit ratchet "
+                "ledger, and paper vs live execution router."
+            ),
+            audience="Quantitative and systematic trading",
+            render=python_algo_trading_console,
         ),
     ] + [
         Tool(
