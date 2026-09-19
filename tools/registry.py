@@ -78,6 +78,7 @@ def all_tools() -> list[Tool]:
     from tools.houzez_idx_hubspot_console.page import render as houzez_idx_hubspot_console
     from tools.research_request_diagnostic_console.page import render as research_request_diagnostic_console
     from tools.school_bus_routing_console.page import render as school_bus_routing_console
+    from tools.mikrotik_netshare_detector.page import render as mikrotik_netshare_detector
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -574,6 +575,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Student transportation and logistics",
             render=school_bus_routing_console,
+        ),
+        Tool(
+            key="mikrotik-netshare-detector",
+            title="MikroTik NetShare Detection Console",
+            icon="\U0001F4F6",
+            tagline=(
+                "Hotspot tethering heuristic analyzer, API polling ledger, "
+                "and voucher unblock interface."
+            ),
+            audience="ISP and hotspot operations",
+            render=mikrotik_netshare_detector,
         ),
     ] + [
         Tool(
