@@ -75,6 +75,7 @@ def all_tools() -> list[Tool]:
     from tools.idrac_rocky_kickstart_console.page import render as idrac_rocky_kickstart_console
     from tools.ipb_v5_upgrade_diagnostic.page import render as ipb_v5_upgrade_diagnostic
     from tools.transfer_booking_routing_console.page import render as transfer_booking_routing_console
+    from tools.houzez_idx_hubspot_console.page import render as houzez_idx_hubspot_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -538,6 +539,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Transport and dispatch",
             render=transfer_booking_routing_console,
+        ),
+        Tool(
+            key="houzez-idx-hubspot-console",
+            title="Houzez IDX & HubSpot Console",
+            icon="\U0001F3E1",
+            tagline=(
+                "Real estate IDX feed simulator, HubSpot tracking validator, "
+                "and Make lead routing ledger."
+            ),
+            audience="Real estate web and CRM",
+            render=houzez_idx_hubspot_console,
         ),
     ] + [
         Tool(
