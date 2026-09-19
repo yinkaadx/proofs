@@ -80,6 +80,7 @@ def all_tools() -> list[Tool]:
     from tools.school_bus_routing_console.page import render as school_bus_routing_console
     from tools.mikrotik_netshare_detector.page import render as mikrotik_netshare_detector
     from tools.python_algo_trading_console.page import render as python_algo_trading_console
+    from tools.ghl_real_estate_architecture_console.page import render as ghl_real_estate_architecture_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -598,6 +599,18 @@ def all_tools() -> list[Tool]:
             ),
             audience="Quantitative and systematic trading",
             render=python_algo_trading_console,
+        ),
+        Tool(
+            key="ghl-real-estate-architecture-console",
+            title="GHL Real Estate Architecture Console",
+            icon="\U0001F3E0",
+            tagline=(
+                "Property first custom object relational modeling, USPS "
+                "address normalization lead intake, and multi signer "
+                "contract tracking."
+            ),
+            audience="Real estate CRM architecture",
+            render=ghl_real_estate_architecture_console,
         ),
     ] + [
         Tool(
