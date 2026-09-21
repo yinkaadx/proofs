@@ -81,6 +81,7 @@ def all_tools() -> list[Tool]:
     from tools.mikrotik_netshare_detector.page import render as mikrotik_netshare_detector
     from tools.python_algo_trading_console.page import render as python_algo_trading_console
     from tools.ghl_real_estate_architecture_console.page import render as ghl_real_estate_architecture_console
+    from tools.fulfillment_process_engineering_console.page import render as fulfillment_process_engineering_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -611,6 +612,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Real estate CRM architecture",
             render=ghl_real_estate_architecture_console,
+        ),
+        Tool(
+            key="fulfillment-process-engineering-console",
+            title="Fulfillment Process Engineering Console",
+            icon="\U0001F3ED",
+            tagline=(
+                "Cycle time bottleneck analyzer, dispatch queue capacity "
+                "model, and software automation requirement generator."
+            ),
+            audience="Operations and process engineering",
+            render=fulfillment_process_engineering_console,
         ),
     ] + [
         Tool(
