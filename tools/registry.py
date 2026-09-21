@@ -89,6 +89,7 @@ def all_tools() -> list[Tool]:
     from tools.holiday_lighting_cv_console.page import render as holiday_lighting_cv_console
     from tools.flexcube_banking_schema_console.page import render as flexcube_banking_schema_console
     from tools.joor_apparel_sync_console.page import render as joor_apparel_sync_console
+    from tools.business_admin_hrm_console.page import render as business_admin_hrm_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -707,6 +708,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Wholesale apparel operations",
             render=joor_apparel_sync_console,
+        ),
+        Tool(
+            key="business-admin-hrm-console",
+            title="Business Admin & HRM Architecture Console",
+            icon="\U0001F5C2",
+            tagline=(
+                "PostgreSQL schema simulator for 300+ staff, multi role "
+                "RBAC matrix, and WordPress JWT integration bridge."
+            ),
+            audience="Internal platform and HR systems",
+            render=business_admin_hrm_console,
         ),
     ] + [
         Tool(
