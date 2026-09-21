@@ -85,6 +85,7 @@ def all_tools() -> list[Tool]:
     from tools.claude_mcp_skill_tester_console.page import render as claude_mcp_skill_tester_console
     from tools.compliance_evidence_audit_console.page import render as compliance_evidence_audit_console
     from tools.data_pipeline_governance_console.page import render as data_pipeline_governance_console
+    from tools.revops_ea_automation_console.page import render as revops_ea_automation_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -659,6 +660,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Data platform and governance engineering",
             render=data_pipeline_governance_console,
+        ),
+        Tool(
+            key="revops-ea-automation-console",
+            title="RevOps EA & Automation Console",
+            icon="\U0001F4E8",
+            tagline=(
+                "AI inbox triage simulator, contractor chasing state "
+                "machine, and call decision ledger."
+            ),
+            audience="RevOps and executive assistance",
+            render=revops_ea_automation_console,
         ),
     ] + [
         Tool(
