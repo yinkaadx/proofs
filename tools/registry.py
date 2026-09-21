@@ -88,6 +88,7 @@ def all_tools() -> list[Tool]:
     from tools.revops_ea_automation_console.page import render as revops_ea_automation_console
     from tools.holiday_lighting_cv_console.page import render as holiday_lighting_cv_console
     from tools.flexcube_banking_schema_console.page import render as flexcube_banking_schema_console
+    from tools.joor_apparel_sync_console.page import render as joor_apparel_sync_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -695,6 +696,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Core banking and regulatory reporting",
             render=flexcube_banking_schema_console,
+        ),
+        Tool(
+            key="joor-apparel-sync-console",
+            title="JOOR ApparelMagic & Extensiv Sync Console",
+            icon="\U0001F457",
+            tagline=(
+                "B2B wholesale order ingestion, style size matrix mapping, "
+                "and Extensiv 3PL inventory reconciler."
+            ),
+            audience="Wholesale apparel operations",
+            render=joor_apparel_sync_console,
         ),
     ] + [
         Tool(
