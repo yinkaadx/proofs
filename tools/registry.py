@@ -87,6 +87,7 @@ def all_tools() -> list[Tool]:
     from tools.data_pipeline_governance_console.page import render as data_pipeline_governance_console
     from tools.revops_ea_automation_console.page import render as revops_ea_automation_console
     from tools.holiday_lighting_cv_console.page import render as holiday_lighting_cv_console
+    from tools.flexcube_banking_schema_console.page import render as flexcube_banking_schema_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -683,6 +684,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Computer vision and field estimation",
             render=holiday_lighting_cv_console,
+        ),
+        Tool(
+            key="flexcube-banking-schema-console",
+            title="Core Banking Schema & Reporting Console",
+            icon="\U0001F3E6",
+            tagline=(
+                "Oracle banking schema mapper, General Ledger "
+                "reconciliation simulator, and regulatory audit extractor."
+            ),
+            audience="Core banking and regulatory reporting",
+            render=flexcube_banking_schema_console,
         ),
     ] + [
         Tool(
