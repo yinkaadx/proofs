@@ -90,6 +90,7 @@ def all_tools() -> list[Tool]:
     from tools.flexcube_banking_schema_console.page import render as flexcube_banking_schema_console
     from tools.joor_apparel_sync_console.page import render as joor_apparel_sync_console
     from tools.business_admin_hrm_console.page import render as business_admin_hrm_console
+    from tools.wix_seo_embed_indexer_console.page import render as wix_seo_embed_indexer_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -719,6 +720,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Internal platform and HR systems",
             render=business_admin_hrm_console,
+        ),
+        Tool(
+            key="wix-seo-embed-indexer-console",
+            title="Wix Technical SEO & Embed Indexer Console",
+            icon="\U0001F517",
+            tagline=(
+                "Wix sandboxed iframe indexing analyzer, Velo custom "
+                "element DOM translator, and JSON LD schema validator."
+            ),
+            audience="Technical SEO and web platform",
+            render=wix_seo_embed_indexer_console,
         ),
     ] + [
         Tool(
