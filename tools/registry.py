@@ -91,6 +91,7 @@ def all_tools() -> list[Tool]:
     from tools.joor_apparel_sync_console.page import render as joor_apparel_sync_console
     from tools.business_admin_hrm_console.page import render as business_admin_hrm_console
     from tools.wix_seo_embed_indexer_console.page import render as wix_seo_embed_indexer_console
+    from tools.woocommerce_store_performance_console.page import render as woocommerce_store_performance_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -731,6 +732,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Technical SEO and web platform",
             render=wix_seo_embed_indexer_console,
+        ),
+        Tool(
+            key="woocommerce-store-performance-console",
+            title="WooCommerce Store Performance & Checkout Console",
+            icon="\U0001F6CD",
+            tagline=(
+                "Elementor script bloat analyzer, payment gateway webhook "
+                "validator, and WooCommerce catalog query optimizer."
+            ),
+            audience="WordPress and WooCommerce engineering",
+            render=woocommerce_store_performance_console,
         ),
     ] + [
         Tool(
