@@ -83,6 +83,7 @@ def all_tools() -> list[Tool]:
     from tools.ghl_real_estate_architecture_console.page import render as ghl_real_estate_architecture_console
     from tools.fulfillment_process_engineering_console.page import render as fulfillment_process_engineering_console
     from tools.claude_mcp_skill_tester_console.page import render as claude_mcp_skill_tester_console
+    from tools.compliance_evidence_audit_console.page import render as compliance_evidence_audit_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -635,6 +636,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Agent and integration engineering",
             render=claude_mcp_skill_tester_console,
+        ),
+        Tool(
+            key="compliance-evidence-audit-console",
+            title="Compliance Evidence & WORM Audit Console",
+            icon="\U00002696",
+            tagline=(
+                "Cryptographic evidence hasher, API payload validator, and "
+                "attorney ready compliance tracker generator."
+            ),
+            audience="Compliance and audit engineering",
+            render=compliance_evidence_audit_console,
         ),
     ] + [
         Tool(
