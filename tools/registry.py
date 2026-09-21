@@ -84,6 +84,7 @@ def all_tools() -> list[Tool]:
     from tools.fulfillment_process_engineering_console.page import render as fulfillment_process_engineering_console
     from tools.claude_mcp_skill_tester_console.page import render as claude_mcp_skill_tester_console
     from tools.compliance_evidence_audit_console.page import render as compliance_evidence_audit_console
+    from tools.data_pipeline_governance_console.page import render as data_pipeline_governance_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -647,6 +648,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Compliance and audit engineering",
             render=compliance_evidence_audit_console,
+        ),
+        Tool(
+            key="data-pipeline-governance-console",
+            title="Data Pipeline & Governance Architecture Console",
+            icon="\U0001F9EE",
+            tagline=(
+                "Data quality automation simulator, pipeline architecture "
+                "trade off matrix, and Row Level Security governance ledger."
+            ),
+            audience="Data platform and governance engineering",
+            render=data_pipeline_governance_console,
         ),
     ] + [
         Tool(
