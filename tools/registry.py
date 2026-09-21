@@ -82,6 +82,7 @@ def all_tools() -> list[Tool]:
     from tools.python_algo_trading_console.page import render as python_algo_trading_console
     from tools.ghl_real_estate_architecture_console.page import render as ghl_real_estate_architecture_console
     from tools.fulfillment_process_engineering_console.page import render as fulfillment_process_engineering_console
+    from tools.claude_mcp_skill_tester_console.page import render as claude_mcp_skill_tester_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -623,6 +624,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Operations and process engineering",
             render=fulfillment_process_engineering_console,
+        ),
+        Tool(
+            key="claude-mcp-skill-tester-console",
+            title="Claude MCP Skill & Agent Testing Console",
+            icon="\U0001F9EA",
+            tagline=(
+                "Claude skill manifest validator, MCP database connection "
+                "simulator, and boundary testing matrix."
+            ),
+            audience="Agent and integration engineering",
+            render=claude_mcp_skill_tester_console,
         ),
     ] + [
         Tool(
