@@ -93,6 +93,7 @@ def all_tools() -> list[Tool]:
     from tools.wix_seo_embed_indexer_console.page import render as wix_seo_embed_indexer_console
     from tools.woocommerce_store_performance_console.page import render as woocommerce_store_performance_console
     from tools.classic_asp_linux_migration_console.page import render as classic_asp_linux_migration_console
+    from tools.telecom_cpaas_gateway_console.page import render as telecom_cpaas_gateway_console
     from tools.airtable_whatsapp_automation_guard.page import render as airtable_whatsapp_automation_guard
     from tools.m365_intranet_architecture_console.page import render as m365_intranet_architecture_console
     from tools.pod_automation_router.page import render as pod_automation_router
@@ -755,6 +756,17 @@ def all_tools() -> list[Tool]:
             ),
             audience="Legacy modernisation",
             render=classic_asp_linux_migration_console,
+        ),
+        Tool(
+            key="telecom-cpaas-gateway-console",
+            title="Telecom CPaaS & SMPP Gateway Console",
+            icon="\U0001F4DE",
+            tagline=(
+                "USSD session lifecycle simulator, SMPP queue failover "
+                "engine, and telecom architecture evaluator."
+            ),
+            audience="Telecom and messaging platforms",
+            render=telecom_cpaas_gateway_console,
         ),
     ] + [
         Tool(
